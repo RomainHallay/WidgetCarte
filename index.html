@@ -1,0 +1,1576 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Carte avancée – widget Grist</title>
+<!--
+  Carte avancée : widget personnalisé pour Grist, dérivé du widget Map.
+  - Pins personnalisables (forme, taille, couleur par catégorie, icône)
+  - Fiche détaillée à la sélection d'un point
+  - Recherche et filtres
+  Dépendances : Leaflet 1.9.4, Leaflet.markercluster 1.5.3, grist-plugin-api
+-->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<style>
+  :root {
+    --ink: #262633;
+    --muted: #6f6f85;
+    --line: #e2e2ea;
+    --surface: #ffffff;
+    --surface-2: #f4f5f7;
+    --accent: #16b378;
+    --accent-ink: #0b8a5a;
+    --accent-soft: #e6f6ef;
+    --r-chrome: 8px;
+    --r-sheet: 12px;
+    --shadow-chrome: 0 1px 3px rgba(38, 38, 51, .14);
+    --shadow-sheet: 0 10px 30px rgba(38, 38, 51, .18), 0 2px 6px rgba(38, 38, 51, .08);
+    --ease-out: cubic-bezier(.2, .8, .2, 1);
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Liberation Sans", Helvetica, Arial, sans-serif,
+            "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { font: 13px/1.4 var(--font); color: var(--ink); background: var(--surface-2); -webkit-font-smoothing: antialiased; }
+  button, input, select { font: inherit; color: inherit; }
+  [hidden] { display: none !important; }
+  #app { position: absolute; inset: 0; }
+  #map { position: absolute; inset: 0; }
+  .leaflet-container { font-family: var(--font); background: #eef0f3; }
+
+  /* Deux niveaux de surfaces : « chrome » discret (outils) et « sheet » (contenus) */
+  .chrome { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-chrome); box-shadow: var(--shadow-chrome); }
+  .sheet { background: var(--surface); border-radius: var(--r-sheet); box-shadow: var(--shadow-sheet); }
+  svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---------- Barre d'outils ---------- */
+  .toolbar {
+    position: absolute; z-index: 1000; top: 10px; left: 10px;
+    width: min(380px, calc(100% - 20px));
+    display: flex; align-items: center; gap: 2px; padding: 4px;
+  }
+  .search {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
+    height: 32px; margin-right: 2px; padding: 0 9px; border-radius: 6px;
+    background: var(--surface-2); color: var(--muted); cursor: text;
+    transition: box-shadow .15s, background .15s;
+  }
+  .search:focus-within { background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--accent); }
+  .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); -webkit-appearance: none; appearance: none; }
+  .icon-btn {
+    position: relative; flex: none; display: inline-grid; place-items: center;
+    width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px;
+    background: transparent; color: var(--ink); cursor: pointer;
+    transition: background .12s, color .12s;
+  }
+  .icon-btn:hover:not(:disabled) { background: var(--surface-2); }
+  .icon-btn:disabled { opacity: .35; cursor: default; }
+  .icon-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); }
+  .icon-btn:focus-visible, .btn:focus-visible, .chip:focus-visible, .seg button:focus-visible, .f-links button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .badge-count {
+    position: absolute; top: 0; right: 0; min-width: 16px; height: 16px; padding: 0 4px;
+    border-radius: 8px; background: var(--accent); color: #fff; box-shadow: 0 0 0 2px var(--surface);
+    font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
+  }
+
+  /* ---------- Boutons et champs ---------- */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink);
+    font-size: 12.5px; font-weight: 600; text-decoration: none; white-space: nowrap; cursor: pointer;
+  }
+  .btn:hover:not(:disabled) { background: var(--surface-2); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover:not(:disabled) { background: var(--accent-ink); border-color: var(--accent-ink); }
+  .btn svg.i { width: 15px; height: 15px; }
+  .select { height: 32px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); max-width: 100%; }
+  .select:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+
+  /* ---------- Panneau de filtres ---------- */
+  .filters {
+    position: absolute; z-index: 1000; top: 58px; left: 10px;
+    width: min(380px, calc(100% - 20px)); max-height: calc(100% - 118px); overflow: auto;
+    padding: 14px 14px 12px; display: none;
+  }
+  .filters.open { display: block; animation: pop .16s var(--ease-out); }
+  .f-section:not([hidden]) ~ .f-section:not([hidden]) { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .f-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+  .f-title { margin: 0; font-size: 13px; font-weight: 700; }
+  .f-links { display: flex; flex: none; gap: 10px; }
+  .f-links button { padding: 0; border: 0; background: none; color: var(--accent-ink); font-size: 12px; cursor: pointer; }
+  .f-links button:hover { text-decoration: underline; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px; max-width: 100%; height: 28px; padding: 0 10px 0 8px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--surface); cursor: pointer;
+    font-size: 12.5px; user-select: none; -webkit-user-select: none;
+    transition: background .12s, border-color .12s, color .12s;
+  }
+  .chip:hover { border-color: #c9c9d6; }
+  .chip .sw { flex: none; width: 11px; height: 11px; border-radius: 50%; background: var(--c); border: 2px solid var(--c); }
+  .chip .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip .n { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .chip.off { background: var(--surface-2); color: var(--muted); border-style: dashed; }
+  .chip.off .sw { background: transparent; }
+  .f-help { margin: 8px 0 0; color: var(--muted); font-size: 11.5px; }
+  .f-select + .f-select { margin-top: 12px; }
+  .f-select label { display: block; margin-bottom: 5px; font-size: 13px; font-weight: 700; }
+  .f-select .select { width: 100%; }
+  .f-empty { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+  .f-empty b { color: var(--ink); }
+  .f-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- Compteur ---------- */
+  .counter {
+    position: absolute; z-index: 1000; left: 10px; bottom: 10px;
+    display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 11px;
+    color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; transition: opacity .2s;
+  }
+  .counter b { color: var(--ink); font-weight: 700; }
+  .counter .sep { width: 1px; height: 14px; background: var(--line); }
+  .counter .demo { padding: 2px 8px; border-radius: 999px; background: #fff3d6; color: #7a5200; font-size: 11px; font-weight: 700; }
+
+  /* ---------- Fiche du point sélectionné ---------- */
+  .details {
+    position: absolute; z-index: 1001; top: 10px; right: 10px; bottom: 10px;
+    width: 320px; max-width: calc(100% - 20px);
+    display: flex; flex-direction: column; overflow: hidden;
+    border-top: 4px solid var(--pin, var(--accent));
+    transform: translateX(calc(100% + 24px)); visibility: hidden;
+    transition: transform .26s var(--ease-out), visibility 0s linear .26s;
+  }
+  .details.open { transform: none; visibility: visible; transition: transform .26s var(--ease-out), visibility 0s; }
+  .d-media { flex: none; background: var(--surface-2); }
+  .d-media img { display: block; width: 100%; height: 150px; object-fit: cover; }
+  .d-bar { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 6px 6px 0 6px; }
+  .d-nav { display: flex; align-items: center; gap: 2px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .d-nav span { min-width: 48px; text-align: center; }
+  .d-body { flex: 1; overflow: auto; padding: 4px 16px 16px; }
+  .d-tag {
+    display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 10px 3px 8px;
+    border-radius: 999px; font-size: 12px; font-weight: 600;
+    background: var(--surface-2); background: color-mix(in srgb, var(--pin) 13%, #fff);
+    color: var(--ink); color: color-mix(in srgb, var(--pin) 60%, #1c1c26);
+  }
+  .d-tag::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pin); }
+  .d-title { margin: 8px 0 14px; font-size: 19px; line-height: 1.25; font-weight: 700; letter-spacing: -.01em; overflow-wrap: anywhere; }
+  .d-note { margin: -6px 0 12px; padding: 7px 10px; border-radius: 6px; background: #fff6e0; color: #7a5200; font-size: 12px; }
+  .d-fields { display: grid; grid-template-columns: minmax(84px, 38%) 1fr; gap: 9px 14px; margin: 0; }
+  .d-fields dt { padding-top: 1px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  .d-fields dd { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+  .d-fields a { color: var(--accent-ink); }
+  .d-coords { margin: 16px 0 0; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .d-foot { flex: none; display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .d-foot .btn { flex: 1; justify-content: center; }
+
+  /* ---------- Superpositions : message et réglages ---------- */
+  .overlay { position: absolute; inset: 0; z-index: 1003; display: none; place-items: center; padding: 16px; background: rgba(38, 38, 51, .3); }
+  .overlay.open { display: grid; }
+  .overlay.soft { z-index: 1002; background: rgba(244, 245, 247, .82); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+  .msg { width: min(380px, 100%); padding: 20px 22px; }
+  .msg h3 { margin: 0 0 6px; font-size: 16px; }
+  .msg p { margin: 0; color: var(--muted); line-height: 1.5; }
+  .msg p b { color: var(--ink); }
+  .msg .btn { margin-top: 14px; }
+  .panel { width: min(440px, 100%); max-height: 100%; overflow: auto; padding: 8px 18px 14px; animation: pop .18s var(--ease-out); }
+  .s-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 0 8px; }
+  .s-head h3 { margin: 0; font-size: 16px; }
+  .s-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+  .s-row > span { display: flex; flex-direction: column; gap: 1px; font-weight: 600; }
+  .s-row small { color: var(--muted); font-size: 11.5px; font-weight: 400; }
+  .seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--surface-2); }
+  .seg button {
+    display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
+    border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer;
+  }
+  .seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(38, 38, 51, .16); }
+  .seg svg { width: 11px; height: 14px; fill: currentColor; }
+  .switch { position: relative; flex: none; width: 36px; height: 20px; }
+  .switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+  .switch span { position: absolute; inset: 0; border-radius: 999px; background: #cfd0da; pointer-events: none; transition: background .15s; }
+  .switch span::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s;
+  }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::after { transform: translateX(16px); }
+  .switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input[type="color"] { width: 40px; height: 28px; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: pointer; }
+  .s-note { margin: 12px 0 0; color: var(--muted); font-size: 11.5px; }
+  @keyframes pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+  /* ---------- Pins ---------- */
+  .pin-icon, .cluster-icon { background: none; border: 0; }
+  .pin { position: relative; width: 100%; height: 100%; }
+  .pin-body {
+    position: relative; width: 100%; height: 100%;
+    filter: drop-shadow(0 1px 1.5px rgba(38, 38, 51, .35));
+    transition: transform .18s cubic-bezier(.3, .7, .4, 1.4), filter .18s;
+  }
+  .pin--drop .pin-body { transform-origin: 50% 100%; }
+  .pin--drop svg { display: block; overflow: visible; }
+  .pin--circle .pin-body, .pin--dot .pin-body { display: grid; place-items: center; border: 2px solid #fff; border-radius: 50%; }
+  .pin-glyph { font-weight: 700; line-height: 1; text-align: center; pointer-events: none; }
+  .pin--drop .pin-glyph { position: absolute; left: 0; right: 0; top: calc(var(--h) * .375 - .5em); font-size: calc(var(--w) * .44); }
+  .pin--circle .pin-glyph { font-size: calc(var(--d) * .48); }
+  .pin-dot { width: 30%; height: 30%; border-radius: 50%; }
+  .leaflet-marker-icon.pin-icon:hover .pin-body { transform: scale(1.12); }
+  .leaflet-marker-icon.pin-icon:focus-visible { outline: none; }
+  .leaflet-marker-icon.pin-icon:focus-visible .pin-body { filter: drop-shadow(0 0 2px var(--accent)) drop-shadow(0 0 2px var(--accent)); }
+  .leaflet-marker-icon.pin-icon .pin.is-selected .pin-body { transform: scale(1.32); filter: drop-shadow(0 3px 4px rgba(38, 38, 51, .4)); }
+  .pin-halo {
+    position: absolute; left: 50%; top: 50%; width: var(--hs); height: var(--hs);
+    margin: calc(var(--hs) / -2) 0 0 calc(var(--hs) / -2);
+    border-radius: 50%; background: var(--c); opacity: 0; pointer-events: none;
+  }
+  .pin--drop .pin-halo { top: 100%; height: calc(var(--hs) * .4); margin-top: calc(var(--hs) * -.2); }
+  .pin.is-selected .pin-halo { animation: halo 1.8s ease-out infinite; }
+  @keyframes halo { 0% { opacity: .5; transform: scale(.5); } 100% { opacity: 0; transform: scale(2.3); } }
+
+  /* Groupes de points : anneau montrant la répartition des catégories */
+  .cluster {
+    display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%;
+    background: var(--ring); box-shadow: 0 2px 6px rgba(38, 38, 51, .28); transition: transform .15s;
+  }
+  .cluster span {
+    display: grid; place-items: center; width: calc(100% - 10px); height: calc(100% - 10px); border-radius: 50%;
+    background: #fff; color: var(--ink); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  }
+  .leaflet-marker-icon.cluster-icon:hover .cluster { transform: scale(1.08); }
+
+  .leaflet-tooltip.pin-tooltip {
+    padding: 4px 8px; border: 0; border-radius: 6px; background: var(--ink); color: #fff;
+    font-size: 12px; font-weight: 600; box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
+  }
+  .leaflet-tooltip-top.pin-tooltip::before { border-top-color: var(--ink); }
+
+  /* Contrôles Leaflet harmonisés */
+  .leaflet-bar, .leaflet-touch .leaflet-bar { border: 1px solid var(--line) !important; border-radius: var(--r-chrome) !important; box-shadow: var(--shadow-chrome) !important; overflow: hidden; }
+  .leaflet-bar a, .leaflet-touch .leaflet-bar a { width: 32px; height: 32px; line-height: 30px; color: var(--ink); }
+  .leaflet-control-attribution { font-size: 10px; background: rgba(255, 255, 255, .8) !important; }
+  .leaflet-bottom.leaflet-right { transition: transform .26s var(--ease-out), opacity .2s; }
+
+  /* ---------- Adaptation à la taille du widget ---------- */
+  @media (min-width: 600px) {
+    #app.details-open .toolbar, #app.details-open .filters { max-width: calc(100% - 360px); }
+    #app.details-open .leaflet-bottom.leaflet-right { transform: translateX(-340px); }
+  }
+  @media (max-width: 599px) {
+    .details { top: auto; left: 10px; right: 10px; width: auto; max-height: 62%; transform: translateY(calc(100% + 24px)); }
+    .d-media img { height: 110px; }
+    .d-fields { grid-template-columns: 1fr; gap: 1px; }
+    .d-fields dd { margin-bottom: 8px; }
+    #app.details-open .counter, #app.details-open .leaflet-bottom.leaflet-right { opacity: 0; pointer-events: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    .pin.is-selected .pin-halo { animation: none; opacity: .28; transform: scale(1.6); }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="map" aria-label="Carte des enregistrements"></div>
+
+  <!-- Barre d'outils -->
+  <div class="toolbar chrome">
+    <label class="search">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="search" type="search" placeholder="Rechercher un point" autocomplete="off" aria-label="Rechercher un point">
+    </label>
+    <button type="button" class="icon-btn" id="btn-filters" aria-pressed="false" aria-controls="filters" title="Filtres" aria-label="Filtres">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7.5V19l-4-2v-4.5z"/></svg>
+      <span class="badge-count" id="filter-count" hidden></span>
+    </button>
+    <button type="button" class="icon-btn" id="btn-fit" title="Recadrer sur les points affichés" aria-label="Recadrer sur les points affichés">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4"/></svg>
+    </button>
+    <button type="button" class="icon-btn" id="btn-settings" title="Apparence de la carte" aria-label="Apparence de la carte">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
+    </button>
+  </div>
+
+  <!-- Panneau de filtres -->
+  <div class="filters sheet" id="filters" role="region" aria-label="Filtres">
+    <section class="f-section" id="f-cats-section" hidden>
+      <div class="f-head">
+        <h3 class="f-title" id="f-cat-title">Catégorie</h3>
+        <div class="f-links">
+          <button type="button" data-cats="all">Tout afficher</button>
+          <button type="button" data-cats="none">Tout masquer</button>
+        </div>
+      </div>
+      <div class="chips" id="f-chips"></div>
+      <p class="f-help">Double-cliquez sur une catégorie pour n’afficher qu’elle.</p>
+    </section>
+    <section class="f-section" id="f-extra" hidden></section>
+    <p class="f-empty" id="f-empty">Pour filtrer par valeur, associez une colonne <b>Catégorie</b> ou des <b>Filtres supplémentaires</b> dans la configuration du widget. La recherche porte déjà sur le nom et les champs de la fiche.</p>
+    <div class="f-foot">
+      <span id="f-summary"></span>
+      <button type="button" class="btn" id="btn-reset">Réinitialiser les filtres</button>
+    </div>
+  </div>
+
+  <div class="counter chrome" id="counter" hidden></div>
+
+  <!-- Fiche du point sélectionné -->
+  <aside class="details sheet" id="details" aria-labelledby="d-title" inert>
+    <div class="d-media" id="d-media" hidden><img id="d-img" alt=""></div>
+    <div class="d-bar">
+      <div class="d-nav">
+        <button type="button" class="icon-btn" id="d-prev" title="Point précédent" aria-label="Point précédent">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <span id="d-pos" aria-live="polite"></span>
+        <button type="button" class="icon-btn" id="d-next" title="Point suivant" aria-label="Point suivant">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+      </div>
+      <button type="button" class="icon-btn" id="d-close" title="Fermer (Échap)" aria-label="Fermer la fiche">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="d-body">
+      <span class="d-tag" id="d-tag" hidden></span>
+      <h2 class="d-title" id="d-title"></h2>
+      <p class="d-note" id="d-hidden" hidden>Ce point est masqué par les filtres en cours.</p>
+      <dl class="d-fields" id="d-fields"></dl>
+      <p class="d-coords" id="d-coords"></p>
+    </div>
+    <div class="d-foot">
+      <button type="button" class="btn primary" id="d-center">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+        Centrer sur la carte
+      </button>
+      <a class="btn" id="d-osm" target="_blank" rel="noopener">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+        OpenStreetMap
+      </a>
+    </div>
+  </aside>
+
+  <!-- Messages (configuration incomplète, attente des données…) -->
+  <div class="overlay soft" id="message" role="status">
+    <div class="sheet msg">
+      <h3 id="msg-title"></h3>
+      <p id="msg-text"></p>
+      <button type="button" class="btn" id="msg-demo" hidden>Voir un aperçu avec des données fictives</button>
+    </div>
+  </div>
+
+  <!-- Réglages d'apparence -->
+  <div class="overlay" id="settings">
+    <div class="sheet panel" role="dialog" aria-modal="true" aria-labelledby="s-title">
+      <div class="s-head">
+        <h3 id="s-title">Apparence de la carte</h3>
+        <button type="button" class="icon-btn" id="s-close" title="Fermer" aria-label="Fermer les réglages">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="s-row">
+        <span>Forme des pins</span>
+        <div class="seg" data-setting="pinStyle" role="group" aria-label="Forme des pins">
+          <button type="button" data-value="drop"><svg viewBox="0 0 30 40" aria-hidden="true"><path d="M15 38C15 38 2 24 2 15a13 13 0 0 1 26 0c0 9-13 23-13 23z"/></svg>Goutte</button>
+          <button type="button" data-value="circle"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8"/></svg>Cercle</button>
+          <button type="button" data-value="dot"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="4.5"/></svg>Point</button>
+        </div>
+      </div>
+      <div class="s-row">
+        <span>Taille des pins</span>
+        <div class="seg" data-setting="pinSize" role="group" aria-label="Taille des pins">
+          <button type="button" data-value="s">Petite</button>
+          <button type="button" data-value="m">Moyenne</button>
+          <button type="button" data-value="l">Grande</button>
+        </div>
+      </div>
+      <div class="s-row">
+        <span>Couleurs de la colonne Choix<small>Sinon, palette automatique</small></span>
+        <label class="switch"><input type="checkbox" id="s-gristcolors" aria-label="Utiliser les couleurs de la colonne Choix"><span></span></label>
+      </div>
+      <div class="s-row">
+        <span>Couleur par défaut<small>Points sans catégorie</small></span>
+        <input type="color" id="s-color" aria-label="Couleur par défaut">
+      </div>
+      <div class="s-row" id="s-cluster-row">
+        <span>Regrouper les points proches<small>Les groupes indiquent la part de chaque catégorie</small></span>
+        <label class="switch"><input type="checkbox" id="s-cluster" aria-label="Regrouper les points proches"><span></span></label>
+      </div>
+      <div class="s-row">
+        <span>Fond de carte</span>
+        <select class="select" id="s-basemap" aria-label="Fond de carte"></select>
+      </div>
+      <p class="s-note" id="s-note"></p>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const qsa = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+
+  /* ==================================================================
+   * 1. Configuration
+   * ================================================================ */
+
+  // Réglages par défaut (modifiables via « Apparence de la carte »)
+  const DEFAULT_SETTINGS = {
+    pinStyle: 'drop',        // drop | circle | dot
+    pinSize: 'm',            // s | m | l
+    defaultColor: '#16b378', // points sans catégorie
+    useGristColors: true,    // reprendre les couleurs d'une colonne Choix
+    cluster: true,           // regrouper les points proches
+    basemap: 'positron',
+  };
+
+  const PIN_STYLES = ['drop', 'circle', 'dot'];
+  const SIZE_FACTORS = { s: 0.8, m: 1, l: 1.25 };
+  const SELECTED_SCALE = 1.32; // doit correspondre au CSS (.pin.is-selected)
+
+  // Palette utilisée quand une catégorie n'a pas de couleur définie dans Grist
+  const PALETTE = ['#2563eb', '#e11d48', '#0d9488', '#d97706', '#7c3aed',
+                   '#0284c7', '#db2777', '#65a30d', '#ea580c', '#475569'];
+
+  // Forme « goutte » (viewBox 0 0 30 40, pointe en bas au centre)
+  const DROP_PATH = 'M15 38C15 38 2 24 2 15a13 13 0 0 1 26 0c0 9-13 23-13 23z';
+
+  const OSM = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
+  const BASEMAPS = {
+    positron: {
+      label: 'Clair (CARTO Positron)',
+      url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      subdomains: 'abcd', maxZoom: 20, attribution: OSM + ' &copy; CARTO',
+    },
+    voyager: {
+      label: 'Détaillé (CARTO Voyager)',
+      url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+      subdomains: 'abcd', maxZoom: 20, attribution: OSM + ' &copy; CARTO',
+    },
+    osm: {
+      label: 'OpenStreetMap',
+      url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      maxZoom: 19, attribution: OSM,
+    },
+    ign: {
+      label: 'Plan IGN (France)',
+      url: 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2'
+        + '&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/png&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
+      maxZoom: 19, attribution: '&copy; IGN – Géoplateforme',
+    },
+    satellite: {
+      label: 'Vue satellite (Esri)',
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      maxZoom: 19, attribution: 'Imagerie &copy; Esri',
+    },
+    dark: {
+      label: 'Sombre (CARTO Dark Matter)',
+      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      subdomains: 'abcd', maxZoom: 20, attribution: OSM + ' &copy; CARTO',
+    },
+  };
+
+  // Colonnes proposées dans le panneau de configuration Grist
+  const COLUMNS = [
+    { name: 'Nom', title: 'Nom', type: 'Any',
+      description: 'Titre affiché au survol et dans la fiche.' },
+    { name: 'Latitude', title: 'Latitude', type: 'Any' },
+    { name: 'Longitude', title: 'Longitude', type: 'Any' },
+    { name: 'Categorie', title: 'Catégorie (couleur)', type: 'Any', optional: true,
+      description: 'Donne la couleur des pins et sert de filtre principal. Avec une colonne Choix, ses couleurs sont reprises.' },
+    { name: 'Icone', title: 'Icône (emoji ou 1-2 caractères)', type: 'Any', optional: true },
+    { name: 'Image', title: 'Image (URL)', type: 'Any', optional: true },
+    { name: 'Details', title: 'Champs de la fiche', type: 'Any', optional: true, allowMultiple: true,
+      description: 'Colonnes affichées dans la fiche du point sélectionné.' },
+    { name: 'Filtres', title: 'Filtres supplémentaires', type: 'Any', optional: true, allowMultiple: true,
+      description: 'Chaque colonne ajoute une liste déroulante dans le panneau de filtres.' },
+  ];
+
+  const MESSAGES = {
+    config: {
+      title: 'Associez vos colonnes',
+      html: 'Pour afficher la carte, choisissez au minimum les colonnes <b>Nom</b>, <b>Latitude</b> et <b>Longitude</b> dans le panneau de configuration du widget, à droite.',
+      demo: false,
+    },
+    wait: {
+      title: 'En attente des données',
+      html: 'Si la carte reste vide, vérifiez que l’<b>accès complet au document</b> a bien été accordé au widget dans le panneau de droite.',
+      demo: true,
+    },
+  };
+
+  /* ==================================================================
+   * 2. État
+   * ================================================================ */
+
+  const S = {
+    settings: Object.assign({}, DEFAULT_SETTINGS),
+    source: null,              // 'grist' | 'demo'
+    mappings: null,
+    mappingKey: '',
+    metaReady: Promise.resolve(),
+    colMeta: {},               // colId -> { label, type, choices, choiceOptions }
+    records: [],
+    byId: new Map(),
+    skipped: 0,
+    catOrder: [],
+    catKeys: [],
+    catColors: new Map(),
+    markers: new Map(),
+    visible: [],
+    visibleIds: new Set(),
+    selectedId: null,
+    panelOpen: false,
+    fitted: false,
+    seq: 0,
+    gristReady: false,
+    cursorSeen: false,
+    lastCursorId: null,
+    pendingCursorId: null,
+    lastLinkKey: null,
+    filters: { search: '', hiddenCats: new Set(), extra: {} },
+  };
+  let waitTimer = null;
+
+  /* ==================================================================
+   * 3. Utilitaires
+   * ================================================================ */
+
+  const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ESC[c]);
+  const norm = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const plural = (n, word) => n + ' ' + word + (n > 1 ? 's' : '');
+  const asArray = (v) => (Array.isArray(v) ? v : (v == null ? [] : [v]));
+
+  function debounce(fn, ms) {
+    let t = null;
+    return function () {
+      const args = arguments;
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(null, args), ms);
+    };
+  }
+
+  function toNumber(v) {
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string') return parseFloat(v.replace(/\s/g, '').replace(',', '.'));
+    return NaN;
+  }
+
+  // Les cellules numériques vides valent 0 dans Grist : (0, 0) est considéré comme absent.
+  function validCoords(lat, lng) {
+    return Number.isFinite(lat) && Number.isFinite(lng)
+      && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+      && !(lat === 0 && lng === 0);
+  }
+
+  function labelFor(colId) {
+    const meta = S.colMeta[colId];
+    return (meta && meta.label) || String(colId || '').replace(/_/g, ' ');
+  }
+
+  // Mise en forme lisible d'une valeur de cellule Grist
+  function fmt(v, colId) {
+    if (v == null || v === '') return '';
+    const meta = colId ? S.colMeta[colId] : null;
+    const type = (meta && meta.type) || '';
+    if (Array.isArray(v)) return v.map((x) => fmt(x, colId)).filter(Boolean).join(', ');
+    if (v instanceof Date) {
+      if (isNaN(v.getTime())) return '';
+      return type.indexOf('DateTime') === 0 ? v.toLocaleString('fr-FR') : v.toLocaleDateString('fr-FR', { timeZone: 'UTC' });
+    }
+    if (typeof v === 'number') {
+      if (type === 'Date') return new Date(v * 1000).toLocaleDateString('fr-FR', { timeZone: 'UTC' });
+      if (type.indexOf('DateTime') === 0) return new Date(v * 1000).toLocaleString('fr-FR');
+      return Number.isInteger(v) ? String(v) : v.toLocaleString('fr-FR', { maximumFractionDigits: 6 });
+    }
+    if (typeof v === 'boolean') return v ? 'Oui' : 'Non';
+    if (typeof v === 'object') {
+      if (typeof v.toString === 'function' && v.toString !== Object.prototype.toString) return String(v);
+      return String(v.name || v.Name || v.label || '');
+    }
+    return String(v);
+  }
+
+  function toList(v, colId) {
+    if (v == null || v === '') return [];
+    if (Array.isArray(v)) return v.map((x) => fmt(x, colId)).filter((x) => x !== '');
+    const s = fmt(v, colId);
+    return s === '' ? [] : [s];
+  }
+
+  // Garde au plus 2 caractères visibles (emoji composés compris)
+  const segmenter = (typeof Intl !== 'undefined' && Intl.Segmenter)
+    ? new Intl.Segmenter('fr', { granularity: 'grapheme' }) : null;
+  function shortGlyph(v) {
+    const s = String(v || '').trim();
+    if (!s) return '';
+    const parts = segmenter ? Array.from(segmenter.segment(s), (x) => x.segment) : Array.from(s);
+    return parts.slice(0, 2).join('');
+  }
+
+  function normalizeHex(c) {
+    let h = String(c || '').trim().replace(/^#/, '');
+    if (/^[0-9a-f]{3}$/i.test(h)) h = h.replace(/./g, (x) => x + x);
+    if (/^[0-9a-f]{8}$/i.test(h)) h = h.slice(0, 6);
+    return /^[0-9a-f]{6}$/i.test(h) ? '#' + h.toLowerCase() : null;
+  }
+  function hexToRgb(c) {
+    const h = normalizeHex(c);
+    if (!h) return null;
+    const n = parseInt(h.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function luminance(c) {
+    const rgb = hexToRgb(c);
+    if (!rgb) return 0;
+    const [r, g, b] = rgb.map((x) => {
+      x /= 255;
+      return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+  function mix(c, target, amount) {
+    const rgb = hexToRgb(c);
+    if (!rgb) return c;
+    return '#' + rgb.map((x) => Math.round(x + (target - x) * amount).toString(16).padStart(2, '0')).join('');
+  }
+
+  // Couleurs d'un pin : contour et contenu adaptés aux couleurs claires
+  function pinPalette(color) {
+    const fill = normalizeHex(color) || S.settings.defaultColor;
+    const light = luminance(fill) > 0.5;
+    const edge = light ? mix(fill, 0, 0.45) : '#ffffff';
+    return { fill, edge, ink: light ? '#262633' : '#ffffff', dot: light ? edge : '#ffffff' };
+  }
+
+  const isSheetLayout = () => window.matchMedia('(max-width: 599px)').matches;
+
+  /* ==================================================================
+   * 4. Carte
+   * ================================================================ */
+
+  if (typeof L === 'undefined') {
+    $('msg-title').textContent = 'Carte indisponible';
+    $('msg-text').textContent = 'La bibliothèque Leaflet n’a pas pu être chargée. Vérifiez l’accès réseau au CDN, ou hébergez Leaflet avec le widget.';
+    $('message').classList.add('open');
+    return;
+  }
+
+  const hasGrist = typeof window.grist !== 'undefined';
+  const canCluster = typeof L.markerClusterGroup === 'function';
+
+  const map = L.map('map', { zoomControl: false, minZoom: 2, worldCopyJump: true }).setView([46.6, 2.4], 5);
+  L.control.zoom({ position: 'bottomright', zoomInTitle: 'Zoomer', zoomOutTitle: 'Dézoomer' }).addTo(map);
+  map.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
+
+  let tileLayer = null;
+  let appliedBasemap = null;
+  let appliedCluster = null;
+
+  const clusterGroup = canCluster ? L.markerClusterGroup({
+    showCoverageOnHover: false,
+    maxClusterRadius: 48,
+    spiderfyOnMaxZoom: true,
+    iconCreateFunction: clusterIcon,
+  }) : null;
+  const plainGroup = L.featureGroup();
+
+  function setBasemap(key) {
+    const def = BASEMAPS[key] || BASEMAPS.positron;
+    if (tileLayer) map.removeLayer(tileLayer);
+    tileLayer = L.tileLayer(def.url, {
+      maxZoom: def.maxZoom,
+      subdomains: def.subdomains || 'abc',
+      attribution: def.attribution,
+    }).addTo(map);
+  }
+
+  function activeGroup() {
+    return (S.settings.cluster && clusterGroup) ? clusterGroup : plainGroup;
+  }
+
+  function mountGroups() {
+    const on = activeGroup();
+    const off = on === clusterGroup ? plainGroup : clusterGroup;
+    if (off) {
+      off.clearLayers();
+      if (map.hasLayer(off)) map.removeLayer(off);
+    }
+    if (!map.hasLayer(on)) map.addLayer(on);
+  }
+
+  // Décalage à prévoir quand la fiche recouvre une partie de la carte
+  function panelOffset() {
+    if (!S.panelOpen) return { dx: 0, dy: 0 };
+    const el = $('details');
+    return isSheetLayout() ? { dx: 0, dy: el.offsetHeight + 10 } : { dx: el.offsetWidth + 10, dy: 0 };
+  }
+
+  function fitVisible(animate) {
+    const pts = S.visible.map((r) => [r.lat, r.lng]);
+    if (!pts.length) return;
+    if (!map.getSize().x) { map.once('resize', () => fitVisible(false)); return; }
+    if (pts.length === 1) { map.setView(pts[0], 13, { animate: !!animate }); return; }
+    const off = panelOffset();
+    map.fitBounds(L.latLngBounds(pts), {
+      paddingTopLeft: [40, 70],
+      paddingBottomRight: [40 + off.dx, 40 + off.dy],
+      maxZoom: 15,
+      animate: !!animate,
+    });
+  }
+
+  // Affiche un marqueur (en ouvrant son groupe si besoin) puis exécute `then`
+  function revealMarker(m, then) {
+    if (S.settings.cluster && clusterGroup && clusterGroup.hasLayer(m)) clusterGroup.zoomToShowLayer(m, then);
+    else then();
+  }
+
+  // Déplace la carte juste ce qu'il faut pour que le point soit visible à côté de la fiche
+  function panToRecord(id) {
+    const m = S.markers.get(id);
+    if (!m || !S.visibleIds.has(id)) return;
+    revealMarker(m, () => {
+      const off = panelOffset();
+      map.panInside(m.getLatLng(), { paddingTopLeft: [40, 70], paddingBottomRight: [40 + off.dx, 40 + off.dy] });
+    });
+  }
+
+  // Centre et zoome sur le point, au milieu de la zone non couverte par la fiche
+  function centerOn(id) {
+    const m = S.markers.get(id);
+    if (!m || !S.visibleIds.has(id)) return;
+    revealMarker(m, () => {
+      const z = Math.max(map.getZoom(), 15);
+      const off = panelOffset();
+      const p = map.project(m.getLatLng(), z).add([off.dx / 2, off.dy / 2]);
+      map.flyTo(map.unproject(p, z), z, { duration: 0.7 });
+    });
+  }
+
+  /* ==================================================================
+   * 5. Pins et groupes
+   * ================================================================ */
+
+  function pinColor(r) {
+    return (r.cat && S.catColors.get(r.cat)) || S.settings.defaultColor;
+  }
+
+  function buildIcon(r, selected) {
+    const s = S.settings;
+    const f = SIZE_FACTORS[s.pinSize] || 1;
+    const k = selected ? SELECTED_SCALE : 1;
+    const p = pinPalette(pinColor(r));
+    const cls = 'pin pin--' + s.pinStyle + (selected ? ' is-selected' : '');
+    const glyph = (r.icon && s.pinStyle !== 'dot')
+      ? '<span class="pin-glyph" style="color:' + p.ink + '">' + esc(r.icon) + '</span>' : '';
+
+    if (s.pinStyle === 'drop') {
+      const w = Math.round(30 * f);
+      const h = Math.round(40 * f);
+      const dot = glyph ? '' : '<circle cx="15" cy="15" r="5" fill="' + p.dot + '"/>';
+      return L.divIcon({
+        className: 'pin-icon',
+        html: '<div class="' + cls + '" style="--c:' + p.fill + ';--w:' + w + 'px;--h:' + h + 'px;--hs:' + Math.round(w * 1.1) + 'px">'
+          + '<span class="pin-halo"></span><div class="pin-body">'
+          + '<svg viewBox="0 0 30 40" width="' + w + '" height="' + h + '" aria-hidden="true">'
+          + '<path d="' + DROP_PATH + '" fill="' + p.fill + '" stroke="' + p.edge + '" stroke-width="2"/>' + dot + '</svg>'
+          + glyph + '</div></div>',
+        iconSize: [w, h],
+        iconAnchor: [w / 2, h],
+        tooltipAnchor: [0, -h * k + 2],
+      });
+    }
+
+    const d = Math.round((s.pinStyle === 'dot' ? 14 : 28) * f);
+    const inner = s.pinStyle === 'circle'
+      ? (glyph || '<span class="pin-dot" style="background:' + p.dot + '"></span>') : '';
+    return L.divIcon({
+      className: 'pin-icon',
+      html: '<div class="' + cls + '" style="--c:' + p.fill + ';--d:' + d + 'px;--hs:' + Math.round(d * 1.3) + 'px">'
+        + '<span class="pin-halo"></span>'
+        + '<div class="pin-body" style="background:' + p.fill + ';border-color:' + p.edge + '">' + inner + '</div></div>',
+      iconSize: [d, d],
+      iconAnchor: [d / 2, d / 2],
+      tooltipAnchor: [0, (-d / 2) * k],
+    });
+  }
+
+  // Groupe : anneau découpé selon la part de chaque couleur (catégorie)
+  function clusterIcon(cluster) {
+    const children = cluster.getAllChildMarkers();
+    const total = children.length;
+    const counts = new Map();
+    children.forEach((m) => {
+      const c = m.options.pinColor || S.settings.defaultColor;
+      counts.set(c, (counts.get(c) || 0) + 1);
+    });
+    let acc = 0;
+    const stops = Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([c, n]) => {
+        const from = (acc / total) * 360;
+        acc += n;
+        const to = (acc / total) * 360;
+        return c + ' ' + from.toFixed(1) + 'deg ' + to.toFixed(1) + 'deg';
+      });
+    const size = total < 10 ? 36 : total < 100 ? 42 : total < 1000 ? 48 : 54;
+    return L.divIcon({
+      className: 'cluster-icon',
+      html: '<div class="cluster" style="--ring:conic-gradient(' + stops.join(',') + ')"><span>' + total + '</span></div>',
+      iconSize: [size, size],
+    });
+  }
+
+  function rebuildMarkers() {
+    S.markers = new Map();
+    S.records.forEach((r) => {
+      const selected = r.id === S.selectedId;
+      const m = L.marker([r.lat, r.lng], {
+        icon: buildIcon(r, selected),
+        pinColor: pinPalette(pinColor(r)).fill,
+        riseOnHover: true,
+        zIndexOffset: selected ? 1000 : 0,
+      });
+      m.bindTooltip(esc(r.name), { direction: 'top', className: 'pin-tooltip', offset: [0, -2] });
+      m.on('click', () => selectRecord(r.id, { pan: true }));
+      S.markers.set(r.id, m);
+    });
+    applyFilters();
+  }
+
+  function refreshMarker(id) {
+    if (id == null) return;
+    const m = S.markers.get(id);
+    const r = S.byId.get(id);
+    if (!m || !r) return;
+    const selected = id === S.selectedId;
+    m.setIcon(buildIcon(r, selected));
+    m.setZIndexOffset(selected ? 1000 : 0);
+  }
+
+  /* ==================================================================
+   * 6. Données : normalisation, couleurs, métadonnées Grist
+   * ================================================================ */
+
+  function normalizeRecords(rows) {
+    const m = S.mappings || {};
+    const detailCols = asArray(m.Details);
+    const filterCols = asArray(m.Filtres);
+    const out = [];
+    let skipped = 0;
+    (rows || []).forEach((row) => {
+      const lat = toNumber(row.Latitude);
+      const lng = toNumber(row.Longitude);
+      if (!validCoords(lat, lng)) { skipped += 1; return; }
+      const cats = toList(row.Categorie, m.Categorie);
+      const dVals = asArray(row.Details);
+      const fVals = asArray(row.Filtres);
+      const details = detailCols.map((colId, i) => ({ colId, text: fmt(dVals[i], colId) }));
+      const filters = {};
+      filterCols.forEach((colId, i) => { filters[colId] = toList(fVals[i], colId); });
+      const name = fmt(row.Nom, m.Nom).trim() || 'Ligne ' + row.id;
+      const image = String(row.Image == null ? '' : row.Image).trim();
+      const rec = {
+        id: row.id, name, lat, lng, cats,
+        cat: cats[0] || '',
+        icon: shortGlyph(fmt(row.Icone, m.Icone)),
+        image: /^https?:\/\//i.test(image) ? image : '',
+        details, filters,
+      };
+      rec.searchText = norm([
+        name, cats.join(' '),
+        details.map((d) => d.text).join(' '),
+        Object.keys(filters).map((k) => filters[k].join(' ')).join(' '),
+      ].join(' '));
+      out.push(rec);
+    });
+    return { out, skipped };
+  }
+
+  // Libellés, types et couleurs de choix des colonnes (nécessite l'accès complet)
+  async function loadColumnMeta() {
+    S.colMeta = {};
+    try {
+      const tableId = typeof grist.getSelectedTableId === 'function'
+        ? await grist.getSelectedTableId()
+        : await grist.selectedTable.getTableId();
+      const [tables, cols] = await Promise.all([
+        grist.docApi.fetchTable('_grist_Tables'),
+        grist.docApi.fetchTable('_grist_Tables_column'),
+      ]);
+      const idx = tables.tableId.indexOf(tableId);
+      if (idx < 0) return;
+      const tableRef = tables.id[idx];
+      for (let i = 0; i < cols.id.length; i++) {
+        if (cols.parentId[i] !== tableRef) continue;
+        let wo = {};
+        try { wo = JSON.parse(cols.widgetOptions[i] || '{}') || {}; } catch (e) { wo = {}; }
+        S.colMeta[cols.colId[i]] = {
+          label: cols.label[i] || cols.colId[i],
+          type: cols.type[i] || '',
+          choices: Array.isArray(wo.choices) ? wo.choices.map(String) : [],
+          choiceOptions: wo.choiceOptions || {},
+        };
+      }
+    } catch (err) {
+      console.warn('[Carte] Métadonnées des colonnes indisponibles (accès complet non accordé ?)', err);
+    }
+  }
+
+  // Ordre et couleur des catégories : ordre des choix Grist, puis ordre alphabétique
+  function computeCategoryColors() {
+    const m = S.mappings || {};
+    const meta = (m.Categorie && S.colMeta[m.Categorie]) || {};
+    const choices = meta.choices || [];
+    const opts = meta.choiceOptions || {};
+    const present = new Set();
+    S.records.forEach((r) => { if (r.cat) present.add(r.cat); });
+    const ordered = choices.filter((c) => present.has(c));
+    const rest = Array.from(present).filter((c) => choices.indexOf(c) < 0)
+      .sort((a, b) => a.localeCompare(b, 'fr', { numeric: true }));
+    S.catOrder = ordered.concat(rest);
+    S.catColors = new Map();
+    let i = 0;
+    S.catOrder.forEach((c) => {
+      const own = S.settings.useGristColors && opts[c] && normalizeHex(opts[c].fillColor);
+      S.catColors.set(c, own || PALETTE[i++ % PALETTE.length]);
+    });
+  }
+
+  function setData(rows) {
+    const res = normalizeRecords(rows);
+    S.records = res.out;
+    S.skipped = res.skipped;
+    S.byId = new Map(S.records.map((r) => [r.id, r]));
+    computeCategoryColors();
+    renderFilters();
+    rebuildMarkers();
+    if (!S.fitted && S.visible.length) {
+      fitVisible(false);
+      S.fitted = true;
+    }
+    if (S.selectedId != null) {
+      const r = S.byId.get(S.selectedId);
+      if (!r) closeDetails(true);
+      else if (S.panelOpen) renderDetails(r);
+    }
+  }
+
+  /* ==================================================================
+   * 7. Filtres
+   * ================================================================ */
+
+  function activeFilterCount(includeSearch) {
+    const f = S.filters;
+    let n = (f.hiddenCats.size ? 1 : 0) + Object.keys(f.extra).filter((k) => f.extra[k] !== '').length;
+    if (includeSearch && f.search.trim()) n += 1;
+    return n;
+  }
+
+  function applyFilters() {
+    const f = S.filters;
+    const tokens = norm(f.search).split(/\s+/).filter(Boolean);
+    const extra = Object.keys(f.extra).filter((k) => f.extra[k] !== '').map((k) => [k, f.extra[k]]);
+    S.visible = S.records.filter((r) => {
+      if (f.hiddenCats.size && f.hiddenCats.has(r.cat)) return false;
+      if (tokens.length && !tokens.every((t) => r.searchText.indexOf(t) >= 0)) return false;
+      for (let i = 0; i < extra.length; i++) {
+        if ((r.filters[extra[i][0]] || []).indexOf(extra[i][1]) < 0) return false;
+      }
+      return true;
+    });
+    S.visibleIds = new Set(S.visible.map((r) => r.id));
+
+    const group = activeGroup();
+    group.clearLayers();
+    const layers = S.visible.map((r) => S.markers.get(r.id)).filter(Boolean);
+    if (typeof group.addLayers === 'function') group.addLayers(layers);
+    else layers.forEach((l) => group.addLayer(l));
+
+    renderCounter();
+    renderFilterStatus();
+    renderNav();
+    syncLinkedWidgets();
+  }
+
+  function renderFilters() {
+    const m = S.mappings || {};
+
+    // Catégories (servent aussi de légende)
+    const counts = new Map();
+    S.records.forEach((r) => counts.set(r.cat, (counts.get(r.cat) || 0) + 1));
+    S.catKeys = m.Categorie ? S.catOrder.concat(counts.has('') ? [''] : []) : [];
+    Array.from(S.filters.hiddenCats).forEach((c) => { if (!counts.has(c)) S.filters.hiddenCats.delete(c); });
+    $('f-cats-section').hidden = !S.catKeys.length;
+    if (S.catKeys.length) {
+      $('f-cat-title').textContent = labelFor(m.Categorie);
+      $('f-chips').innerHTML = S.catKeys.map((k) => {
+        const color = k ? S.catColors.get(k) : S.settings.defaultColor;
+        return '<button type="button" class="chip" data-cat="' + esc(k) + '" style="--c:' + color + '"'
+          + ' title="Clic : afficher ou masquer. Double-clic : n’afficher que cette catégorie.">'
+          + '<span class="sw"></span><span class="lbl">' + esc(k || 'Sans catégorie') + '</span>'
+          + '<span class="n">' + counts.get(k) + '</span></button>';
+      }).join('');
+      renderChipsState();
+    } else {
+      $('f-chips').innerHTML = '';
+    }
+
+    // Filtres supplémentaires : une liste déroulante par colonne
+    const cols = asArray(m.Filtres);
+    const box = $('f-extra');
+    box.hidden = !cols.length;
+    box.innerHTML = cols.map((colId) => {
+      const values = new Map();
+      S.records.forEach((r) => (r.filters[colId] || []).forEach((v) => values.set(v, (values.get(v) || 0) + 1)));
+      const sorted = Array.from(values.keys()).sort((a, b) => a.localeCompare(b, 'fr', { numeric: true }));
+      let cur = S.filters.extra[colId] || '';
+      if (cur && !values.has(cur)) { cur = ''; delete S.filters.extra[colId]; }
+      const id = 'fx-' + String(colId).replace(/[^\w-]/g, '_');
+      return '<div class="f-select"><label for="' + id + '">' + esc(labelFor(colId)) + '</label>'
+        + '<select class="select" id="' + id + '" data-col="' + esc(colId) + '">'
+        + '<option value="">Toutes les valeurs</option>'
+        + sorted.map((v) => '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>'
+          + esc(v) + ' (' + values.get(v) + ')</option>').join('')
+        + '</select></div>';
+    }).join('');
+
+    $('f-empty').hidden = !!(S.catKeys.length || cols.length);
+  }
+
+  function renderChipsState() {
+    qsa('#f-chips .chip').forEach((chip) => {
+      const off = S.filters.hiddenCats.has(chip.dataset.cat);
+      chip.classList.toggle('off', off);
+      chip.setAttribute('aria-pressed', String(!off));
+    });
+  }
+
+  function renderFilterStatus() {
+    const n = activeFilterCount(false);
+    const badge = $('filter-count');
+    badge.hidden = !n;
+    badge.textContent = n ? String(n) : '';
+    $('f-summary').textContent = S.visible.length + ' sur ' + plural(S.records.length, 'point');
+    $('btn-reset').disabled = !activeFilterCount(true);
+  }
+
+  function renderCounter() {
+    const el = $('counter');
+    if (!S.source || !S.mappings) { el.hidden = true; return; }
+    el.hidden = false;
+    const total = S.records.length;
+    const vis = S.visible.length;
+    let html = '';
+    if (S.source === 'demo') {
+      html += '<span class="demo" title="Aucune donnée reçue de Grist : aperçu avec des données fictives">Aperçu</span>';
+    }
+    html += vis === total
+      ? '<span><b>' + plural(total, 'point') + '</b></span>'
+      : '<span><b>' + vis + '</b> sur ' + plural(total, 'point') + '</span>';
+    if (S.skipped) {
+      html += '<span class="sep"></span><span title="Lignes sans latitude ou longitude valides">'
+        + S.skipped + ' sans coordonnées</span>';
+    }
+    el.innerHTML = html;
+  }
+
+  function toggleFilters(force) {
+    const panel = $('filters');
+    const open = typeof force === 'boolean' ? force : !panel.classList.contains('open');
+    panel.classList.toggle('open', open);
+    $('btn-filters').setAttribute('aria-pressed', String(open));
+  }
+
+  function resetFilters() {
+    S.filters = { search: '', hiddenCats: new Set(), extra: {} };
+    $('search').value = '';
+    renderFilters();
+    applyFilters();
+  }
+
+  // Les widgets liés à la carte (« Sélectionner par ») n'affichent que les points filtrés
+  function syncLinkedWidgets() {
+    if (S.source !== 'grist' || typeof grist.setSelectedRows !== 'function') return;
+    const active = activeFilterCount(true) > 0;
+    const ids = active ? S.visible.map((r) => r.id) : null;
+    const key = active ? ids.join(',') : 'all';
+    if (key === S.lastLinkKey) return;
+    S.lastLinkKey = key;
+    Promise.resolve(grist.setSelectedRows(ids)).catch(() => {});
+  }
+
+  /* ==================================================================
+   * 8. Sélection et fiche
+   * ================================================================ */
+
+  function selectRecord(id, opts) {
+    const o = Object.assign({ pan: false, fromGrist: false, openPanel: true }, opts);
+    const prev = S.selectedId;
+    S.selectedId = id;
+    if (prev !== id) { refreshMarker(prev); refreshMarker(id); }
+    const rec = S.byId.get(id);
+    if (!rec) { closeDetails(true); return; }
+    if (o.openPanel) { renderDetails(rec); openDetails(); }
+    if (o.pan) panToRecord(id);
+    if (!o.fromGrist && S.source === 'grist') {
+      S.lastCursorId = id;
+      Promise.resolve(grist.setCursorPos({ rowId: id })).catch(() => {});
+    }
+  }
+
+  function renderDetails(r) {
+    const el = $('details');
+    el.style.setProperty('--pin', pinPalette(pinColor(r)).fill);
+
+    const tag = $('d-tag');
+    tag.hidden = !r.cats.length;
+    tag.textContent = r.cats.join(', ');
+    $('d-title').textContent = r.name;
+
+    const media = $('d-media');
+    const img = $('d-img');
+    if (r.image) {
+      media.hidden = false;
+      img.onerror = () => { media.hidden = true; };
+      if (img.getAttribute('src') !== r.image) img.src = r.image;
+    } else {
+      media.hidden = true;
+      img.removeAttribute('src');
+    }
+
+    const dl = $('d-fields');
+    dl.textContent = '';
+    r.details.forEach((d) => {
+      if (!d.text) return;
+      const dt = document.createElement('dt');
+      dt.textContent = labelFor(d.colId);
+      const dd = document.createElement('dd');
+      renderValue(dd, d.text);
+      dl.append(dt, dd);
+    });
+    dl.hidden = !dl.childElementCount;
+
+    $('d-coords').textContent = r.lat.toFixed(5) + ', ' + r.lng.toFixed(5);
+    $('d-osm').href = 'https://www.openstreetmap.org/?mlat=' + r.lat + '&mlon=' + r.lng + '#map=17/' + r.lat + '/' + r.lng;
+    renderNav();
+  }
+
+  // Liens web et adresses e-mail rendus cliquables
+  function renderValue(dd, text) {
+    const t = text.trim();
+    if (/^https?:\/\/\S+$/i.test(t)) {
+      const a = document.createElement('a');
+      a.href = t; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = t.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '');
+      dd.append(a);
+    } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t)) {
+      const a = document.createElement('a');
+      a.href = 'mailto:' + t;
+      a.textContent = t;
+      dd.append(a);
+    } else {
+      dd.textContent = text;
+    }
+  }
+
+  function renderNav() {
+    const n = S.visible.length;
+    const idx = S.visible.findIndex((r) => r.id === S.selectedId);
+    $('d-pos').textContent = n ? (idx >= 0 ? idx + 1 : '–') + ' / ' + n : '0 / 0';
+    const stuck = n === 0 || (n === 1 && idx === 0);
+    $('d-prev').disabled = stuck;
+    $('d-next').disabled = stuck;
+    $('d-hidden').hidden = !(S.selectedId != null && idx < 0);
+  }
+
+  function step(delta) {
+    const n = S.visible.length;
+    if (!n) return;
+    let idx = S.visible.findIndex((r) => r.id === S.selectedId);
+    idx = idx < 0 ? 0 : (idx + delta + n) % n;
+    selectRecord(S.visible[idx].id, { pan: true });
+  }
+
+  function openDetails() {
+    S.panelOpen = true;
+    const el = $('details');
+    el.classList.add('open');
+    el.inert = false;
+    $('app').classList.add('details-open');
+  }
+
+  function closeDetails(deselect) {
+    S.panelOpen = false;
+    const el = $('details');
+    el.classList.remove('open');
+    el.inert = true;
+    $('app').classList.remove('details-open');
+    if (deselect && S.selectedId != null) {
+      const prev = S.selectedId;
+      S.selectedId = null;
+      refreshMarker(prev);
+      renderNav();
+    }
+  }
+
+  // Curseur déplacé dans Grist (clic sur une ligne d'un autre widget)
+  function handleCursor(id) {
+    if (id === S.lastCursorId) return;
+    S.lastCursorId = id;
+    const first = !S.cursorSeen;
+    S.cursorSeen = true;
+    if (!S.byId.has(id)) {
+      if (S.panelOpen) closeDetails(true);
+      return;
+    }
+    // Au chargement, on met seulement le point en évidence, sans ouvrir la fiche
+    if (first) { selectRecord(id, { fromGrist: true, openPanel: false }); return; }
+    selectRecord(id, { pan: true, fromGrist: true });
+  }
+
+  /* ==================================================================
+   * 9. Réglages
+   * ================================================================ */
+
+  function sanitizeSettings(o) {
+    const s = Object.assign({}, DEFAULT_SETTINGS, (o && typeof o === 'object') ? o : {});
+    if (PIN_STYLES.indexOf(s.pinStyle) < 0) s.pinStyle = DEFAULT_SETTINGS.pinStyle;
+    if (!SIZE_FACTORS[s.pinSize]) s.pinSize = DEFAULT_SETTINGS.pinSize;
+    s.defaultColor = normalizeHex(s.defaultColor) || DEFAULT_SETTINGS.defaultColor;
+    if (!BASEMAPS[s.basemap]) s.basemap = DEFAULT_SETTINGS.basemap;
+    s.useGristColors = s.useGristColors !== false;
+    s.cluster = canCluster && s.cluster !== false;
+    return s;
+  }
+
+  function applySettings() {
+    const s = S.settings;
+    if (appliedBasemap !== s.basemap) { setBasemap(s.basemap); appliedBasemap = s.basemap; }
+    if (appliedCluster !== s.cluster) { appliedCluster = s.cluster; mountGroups(); }
+    computeCategoryColors();
+    renderFilters();
+    rebuildMarkers();
+    if (S.panelOpen && S.selectedId != null && S.byId.has(S.selectedId)) renderDetails(S.byId.get(S.selectedId));
+  }
+
+  function syncSettingsForm() {
+    qsa('.seg[data-setting]').forEach((seg) => {
+      const val = S.settings[seg.dataset.setting];
+      qsa('button[data-value]', seg).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === val)));
+    });
+    $('s-gristcolors').checked = S.settings.useGristColors;
+    $('s-color').value = S.settings.defaultColor;
+    $('s-cluster').checked = S.settings.cluster;
+    $('s-cluster-row').hidden = !canCluster;
+    $('s-basemap').value = S.settings.basemap;
+  }
+
+  const saveSettingsSoon = debounce(() => {
+    if (S.source !== 'grist' || !hasGrist || typeof grist.setOptions !== 'function') return;
+    Promise.resolve(grist.setOptions(Object.assign({}, S.settings))).catch((err) => {
+      console.warn('[Carte] Réglages non enregistrés :', err);
+      $('s-note').textContent = 'Réglages appliqués pour cette session, mais non enregistrés (droits d’édition requis).';
+    });
+  }, 400);
+
+  function updateSetting(key, value) {
+    const next = Object.assign({}, S.settings);
+    next[key] = value;
+    S.settings = sanitizeSettings(next);
+    syncSettingsForm();
+    applySettings();
+    saveSettingsSoon();
+  }
+
+  function openSettings() {
+    syncSettingsForm();
+    $('s-note').textContent = S.source === 'grist'
+      ? 'Les réglages sont enregistrés avec le widget.'
+      : 'Aperçu : les réglages s’appliquent mais ne sont pas enregistrés.';
+    $('settings').classList.add('open');
+    const current = $('settings').querySelector('button[aria-pressed="true"]');
+    if (current) current.focus();
+  }
+
+  function closeSettings() {
+    $('settings').classList.remove('open');
+    $('btn-settings').focus();
+  }
+
+  /* ==================================================================
+   * 10. Messages
+   * ================================================================ */
+
+  function showMessage(key) {
+    const m = MESSAGES[key];
+    $('msg-title').textContent = m.title;
+    $('msg-text').innerHTML = m.html;
+    $('msg-demo').hidden = !m.demo;
+    $('message').classList.add('open');
+  }
+
+  function hideMessage() {
+    $('message').classList.remove('open');
+  }
+
+  /* ==================================================================
+   * 11. Interface
+   * ================================================================ */
+
+  function wireUI() {
+    // Recherche
+    const onSearch = debounce(() => { S.filters.search = $('search').value; applyFilters(); }, 120);
+    $('search').addEventListener('input', onSearch);
+    $('search').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        S.filters.search = e.target.value;
+        applyFilters();
+        if (S.visible.length === 1) selectRecord(S.visible[0].id, { pan: true });
+        else fitVisible(true);
+      } else if (e.key === 'Escape' && e.target.value) {
+        e.stopPropagation();
+        e.target.value = '';
+        S.filters.search = '';
+        applyFilters();
+      }
+    });
+
+    // Barre d'outils
+    $('btn-filters').addEventListener('click', () => toggleFilters());
+    $('btn-fit').addEventListener('click', () => fitVisible(true));
+    $('btn-settings').addEventListener('click', openSettings);
+
+    // Catégories : clic = afficher/masquer, double-clic = isoler (ou tout réafficher)
+    $('f-chips').addEventListener('click', (e) => {
+      const chip = e.target.closest('.chip');
+      if (!chip) return;
+      const cat = chip.dataset.cat;
+      const hidden = S.filters.hiddenCats;
+      if (hidden.has(cat)) hidden.delete(cat); else hidden.add(cat);
+      renderChipsState();
+      applyFilters();
+    });
+    $('f-chips').addEventListener('dblclick', (e) => {
+      const chip = e.target.closest('.chip');
+      if (!chip) return;
+      const cat = chip.dataset.cat;
+      const others = S.catKeys.filter((k) => k !== cat);
+      const hidden = S.filters.hiddenCats;
+      const isolated = !hidden.has(cat) && others.every((k) => hidden.has(k));
+      S.filters.hiddenCats = isolated ? new Set() : new Set(others);
+      renderChipsState();
+      applyFilters();
+    });
+    qsa('[data-cats]').forEach((b) => b.addEventListener('click', () => {
+      S.filters.hiddenCats = b.dataset.cats === 'none' ? new Set(S.catKeys) : new Set();
+      renderChipsState();
+      applyFilters();
+    }));
+    $('f-extra').addEventListener('change', (e) => {
+      const sel = e.target.closest('select[data-col]');
+      if (!sel) return;
+      S.filters.extra[sel.dataset.col] = sel.value;
+      applyFilters();
+    });
+    $('btn-reset').addEventListener('click', resetFilters);
+
+    // Fiche
+    $('d-close').addEventListener('click', () => closeDetails(true));
+    $('d-prev').addEventListener('click', () => step(-1));
+    $('d-next').addEventListener('click', () => step(1));
+    $('d-center').addEventListener('click', () => { if (S.selectedId != null) centerOn(S.selectedId); });
+
+    // Message
+    $('msg-demo').addEventListener('click', loadDemo);
+
+    // Réglages
+    $('s-basemap').innerHTML = Object.keys(BASEMAPS)
+      .map((k) => '<option value="' + k + '">' + esc(BASEMAPS[k].label) + '</option>').join('');
+    qsa('.seg[data-setting]').forEach((seg) => seg.addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-value]');
+      if (b) updateSetting(seg.dataset.setting, b.dataset.value);
+    }));
+    $('s-gristcolors').addEventListener('change', (e) => updateSetting('useGristColors', e.target.checked));
+    $('s-color').addEventListener('input', debounce(() => updateSetting('defaultColor', $('s-color').value), 80));
+    $('s-cluster').addEventListener('change', (e) => updateSetting('cluster', e.target.checked));
+    $('s-basemap').addEventListener('change', (e) => updateSetting('basemap', e.target.value));
+    $('s-close').addEventListener('click', closeSettings);
+    $('settings').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeSettings(); });
+
+    // Carte et clavier
+    map.on('click', () => {
+      toggleFilters(false);
+      if (S.panelOpen) closeDetails(true);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if ($('settings').classList.contains('open')) closeSettings();
+      else if ($('filters').classList.contains('open')) toggleFilters(false);
+      else if (S.panelOpen) closeDetails(true);
+    });
+  }
+
+  /* ==================================================================
+   * 12. Intégration Grist
+   * ================================================================ */
+
+  function initGrist() {
+    grist.ready({
+      requiredAccess: 'full',
+      columns: COLUMNS,
+      allowSelectBy: true,
+      onEditOptions: openSettings,
+    });
+
+    grist.onOptions((options) => {
+      S.settings = sanitizeSettings(options);
+      syncSettingsForm();
+      applySettings();
+    });
+
+    grist.onRecords(async (rows, mappings) => {
+      clearTimeout(waitTimer);
+      const seq = ++S.seq;
+      if (S.source !== 'grist') {
+        // Passage de l'aperçu aux vraies données
+        S.source = 'grist';
+        closeDetails(true);
+        S.filters = { search: '', hiddenCats: new Set(), extra: {} };
+        $('search').value = '';
+        S.fitted = false;
+      }
+      const mapped = grist.mapColumnNames(rows);
+      if (!mapped) {
+        S.gristReady = false;
+        S.mappings = null;
+        S.mappingKey = '';
+        setData([]);
+        showMessage('config');
+        return;
+      }
+      hideMessage();
+      const key = JSON.stringify(mappings || {});
+      if (key !== S.mappingKey) {
+        S.mappingKey = key;
+        S.mappings = mappings || {};
+        S.metaReady = loadColumnMeta();
+        S.fitted = false;
+        S.filters.extra = {};
+        S.filters.hiddenCats = new Set();
+      }
+      await S.metaReady;
+      if (seq !== S.seq) return;
+      setData(mapped);
+      S.gristReady = true;
+      if (S.pendingCursorId != null) {
+        const id = S.pendingCursorId;
+        S.pendingCursorId = null;
+        handleCursor(id);
+      }
+    });
+
+    grist.onRecord((rec) => {
+      if (!rec || rec.id == null) return;
+      if (!S.gristReady) { S.pendingCursorId = rec.id; return; }
+      handleCursor(rec.id);
+    });
+  }
+
+  /* ==================================================================
+   * 13. Aperçu avec des données fictives (hors de Grist)
+   * ================================================================ */
+
+  const DEMO_META = {
+    Type: {
+      label: 'Type de site', type: 'Choice',
+      choices: ['Siège', 'Agence', 'Partenaire', 'Projet'],
+      choiceOptions: {
+        'Siège': { fillColor: '#1d4ed8' },
+        'Agence': { fillColor: '#16b378' },
+        'Partenaire': { fillColor: '#d97706' },
+        'Projet': { fillColor: '#e11d48' },
+      },
+    },
+    Ville: { label: 'Ville', type: 'Text' },
+    Responsable: { label: 'Responsable', type: 'Text' },
+    Ouverture: { label: 'Ouverture', type: 'Text' },
+    Contact: { label: 'Contact', type: 'Text' },
+    Statut: { label: 'Statut', type: 'Choice' },
+    Region: { label: 'Région', type: 'Choice' },
+  };
+  const DEMO_MAPPINGS = {
+    Nom: 'Nom', Latitude: 'Latitude', Longitude: 'Longitude', Categorie: 'Type', Icone: 'Icone', Image: null,
+    Details: ['Ville', 'Responsable', 'Ouverture', 'Contact'], Filtres: ['Statut', 'Region'],
+  };
+  const DEMO_ICONS = { 'Siège': '🏛️', 'Agence': '🏢', 'Partenaire': '🤝', 'Projet': '🚧' };
+  const DEMO_ROWS = [
+    [1, 'Siège', 48.8566, 2.3522, 'Siège', 'Paris', 'Camille Martin', '2012', 'Actif', 'Île-de-France'],
+    [2, 'Agence Paris-Ouest', 48.8918, 2.2361, 'Agence', 'Puteaux', 'Louis Bernard', '2018', 'Actif', 'Île-de-France'],
+    [3, 'Atelier partagé de Montreuil', 48.8638, 2.4485, 'Partenaire', 'Montreuil', 'Chloé Dubois', '2021', 'Actif', 'Île-de-France'],
+    [4, 'Agence de Lyon', 45.7640, 4.8357, 'Agence', 'Lyon', 'Hugo Thomas', '2015', 'Actif', 'Auvergne-Rhône-Alpes'],
+    [5, 'Laboratoire associé', 45.1885, 5.7245, 'Partenaire', 'Grenoble', 'Léa Robert', '2022', 'En cours', 'Auvergne-Rhône-Alpes'],
+    [6, 'Extension Clermont', 45.7772, 3.0870, 'Projet', 'Clermont-Ferrand', 'Nathan Richard', '2026', 'À l’étude', 'Auvergne-Rhône-Alpes'],
+    [7, 'Agence de Marseille', 43.2965, 5.3698, 'Agence', 'Marseille', 'Manon Petit', '2016', 'Actif', 'Provence-Alpes-Côte d’Azur'],
+    [8, 'Agence de Nice', 43.7102, 7.2620, 'Agence', 'Nice', 'Jules Durand', '2019', 'Actif', 'Provence-Alpes-Côte d’Azur'],
+    [9, 'Agence de Bordeaux', 44.8378, -0.5792, 'Agence', 'Bordeaux', 'Inès Leroy', '2017', 'Actif', 'Nouvelle-Aquitaine'],
+    [10, 'Agence de Lille', 50.6292, 3.0573, 'Agence', 'Lille', 'Gabriel Moreau', '2014', 'Actif', 'Hauts-de-France'],
+    [11, 'Pôle transfrontalier', 48.5734, 7.7521, 'Partenaire', 'Strasbourg', 'Jade Simon', '2020', 'Actif', 'Grand Est'],
+    [12, 'Incubateur régional', 43.6047, 1.4442, 'Partenaire', 'Toulouse', 'Arthur Laurent', '2023', 'En cours', 'Occitanie'],
+    [13, 'Nouveau campus', 43.6108, 3.8767, 'Projet', 'Montpellier', 'Emma Michel', '2026', 'En cours', 'Occitanie'],
+    [14, 'Antenne de Rennes', 48.1173, -1.6778, 'Projet', 'Rennes', 'Raphaël Garcia', '2027', 'À l’étude', 'Bretagne'],
+    [15, 'Station littorale', 48.3904, -4.4861, 'Partenaire', 'Brest', 'Alice David', '2021', 'Actif', 'Bretagne'],
+    [16, 'Antenne de Dijon', 47.3220, 5.0415, 'Projet', 'Dijon', 'Tom Bertrand', '2026', 'À l’étude', 'Bourgogne-Franche-Comté'],
+    [17, 'Site sans coordonnées', null, null, 'Projet', 'Tours', 'Zoé Roux', '2027', 'À l’étude', 'Centre-Val de Loire'],
+  ].map((d) => ({
+    id: d[0], Nom: d[1], Latitude: d[2], Longitude: d[3], Categorie: d[4], Icone: DEMO_ICONS[d[4]], Image: null,
+    Details: [d[5], d[6], d[7], 'contact.' + norm(d[5]).replace(/[^a-z0-9]+/g, '-') + '@example.org'],
+    Filtres: [d[8], d[9]],
+  }));
+
+  function loadDemo() {
+    clearTimeout(waitTimer);
+    hideMessage();
+    S.source = 'demo';
+    S.mappings = DEMO_MAPPINGS;
+    S.mappingKey = 'demo';
+    S.colMeta = DEMO_META;
+    S.fitted = false;
+    setData(DEMO_ROWS);
+  }
+
+  /* ==================================================================
+   * 14. Démarrage
+   * ================================================================ */
+
+  S.settings = sanitizeSettings(null);
+  wireUI();
+  syncSettingsForm();
+  applySettings();
+
+  const inIframe = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+  if (hasGrist && inIframe) {
+    initGrist();
+    waitTimer = setTimeout(() => { if (!S.source) showMessage('wait'); }, 3000);
+  } else {
+    loadDemo();
+  }
+})();
+</script>
+</body>
+</html>
