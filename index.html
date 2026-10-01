@@ -28,6 +28,7 @@
     --accent-soft: #e6f6ef;
     --r-chrome: 8px;
     --r-sheet: 12px;
+    --details-w: 512px;
     --shadow-chrome: 0 1px 3px rgba(38, 38, 51, .14);
     --shadow-sheet: 0 10px 30px rgba(38, 38, 51, .18), 0 2px 6px rgba(38, 38, 51, .08);
     --ease-out: cubic-bezier(.2, .8, .2, 1);
@@ -145,7 +146,7 @@
   /* ---------- Fiche du point sélectionné ---------- */
   .details {
     position: absolute; z-index: 1001; top: 10px; right: 10px; bottom: 10px;
-    width: 320px; max-width: calc(100% - 20px);
+    width: var(--details-w); max-width: calc(100% - 20px);
     display: flex; flex-direction: column; overflow: hidden;
     border-top: 4px solid var(--pin, var(--accent));
     transform: translateX(calc(100% + 24px)); visibility: hidden;
@@ -165,7 +166,9 @@
     color: var(--ink); color: color-mix(in srgb, var(--pin) 60%, #1c1c26);
   }
   .d-tag::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pin); }
-  .d-title { margin: 8px 0 14px; font-size: 19px; line-height: 1.25; font-weight: 700; letter-spacing: -.01em; overflow-wrap: anywhere; }
+  .d-tag-row { display: flex; align-items: center; gap: 6px; margin: 0 0 2px; }
+  .d-title-row { display: flex; align-items: flex-start; gap: 6px; margin: 8px 0 14px; }
+  .d-title { margin: 0; flex: 1; min-width: 0; font-size: 19px; line-height: 1.25; font-weight: 700; letter-spacing: -.01em; overflow-wrap: anywhere; }
   .d-note { margin: -6px 0 12px; padding: 7px 10px; border-radius: 6px; background: #fff6e0; color: #7a5200; font-size: 12px; }
   .d-fields { display: grid; grid-template-columns: minmax(84px, 38%) 1fr; gap: 9px 14px; margin: 0; }
   .d-fields dt { padding-top: 1px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
@@ -174,6 +177,22 @@
   .d-coords { margin: 16px 0 0; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   .d-foot { flex: none; display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
   .d-foot .btn { flex: 1; justify-content: center; }
+
+  /* ---------- Édition d'un champ (crayon / validation) ---------- */
+  .f-edit {
+    flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0;
+    border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer;
+  }
+  .f-edit svg.i { width: 14px; height: 14px; }
+  .f-edit:hover { background: var(--surface-2); color: var(--ink); }
+  .f-edit:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .d-field-row { display: flex; align-items: flex-start; gap: 6px; }
+  .d-field-row .d-field-val { flex: 1; min-width: 0; }
+  .d-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+  .d-edit-input { flex: 1; min-width: 0; width: 100%; }
+  .d-edit .chips { flex: 1; }
+  .d-edit .f-save { flex: none; }
+  .d-edit-error { flex: none; width: 100%; margin: 2px 0 0; color: #b42318; font-size: 11.5px; }
 
   /* ---------- Superpositions : message et réglages ---------- */
   .overlay { position: absolute; inset: 0; z-index: 1003; display: none; place-items: center; padding: 16px; background: rgba(38, 38, 51, .3); }
@@ -264,8 +283,8 @@
 
   /* ---------- Adaptation à la taille du widget ---------- */
   @media (min-width: 600px) {
-    #app.details-open .toolbar, #app.details-open .filters { max-width: calc(100% - 360px); }
-    #app.details-open .leaflet-bottom.leaflet-right { transform: translateX(-340px); }
+    #app.details-open .toolbar, #app.details-open .filters { max-width: calc(100% - (var(--details-w) + 40px)); }
+    #app.details-open .leaflet-bottom.leaflet-right { transform: translateX(calc(-1 * (var(--details-w) + 20px))); }
   }
   @media (max-width: 599px) {
     .details { top: auto; left: 10px; right: 10px; width: auto; max-height: 62%; transform: translateY(calc(100% + 24px)); }
@@ -343,8 +362,18 @@
       </button>
     </div>
     <div class="d-body">
-      <span class="d-tag" id="d-tag" hidden></span>
-      <h2 class="d-title" id="d-title"></h2>
+      <div class="d-tag-row">
+        <span class="d-tag" id="d-tag" hidden></span>
+        <button type="button" class="f-edit" id="d-cat-edit" hidden title="Modifier" aria-label="Modifier la catégorie">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19.5 8.5a2 2 0 0 0 0-2.8L18.3 4.5a2 2 0 0 0-2.8 0L4 16v4z"/><path d="M14.5 6.5l3 3"/></svg>
+        </button>
+      </div>
+      <div class="d-title-row">
+        <h2 class="d-title" id="d-title"></h2>
+        <button type="button" class="f-edit" id="d-title-edit" hidden title="Modifier" aria-label="Modifier le nom">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19.5 8.5a2 2 0 0 0 0-2.8L18.3 4.5a2 2 0 0 0-2.8 0L4 16v4z"/><path d="M14.5 6.5l3 3"/></svg>
+        </button>
+      </div>
       <p class="d-note" id="d-hidden" hidden>Ce point est masqué par les filtres en cours.</p>
       <dl class="d-fields" id="d-fields"></dl>
       <p class="d-coords" id="d-coords"></p>
@@ -520,6 +549,7 @@
     source: null,              // 'grist' | 'demo'
     mappings: null,
     mappingKey: '',
+    tableId: null,
     metaReady: Promise.resolve(),
     colMeta: {},               // colId -> { label, type, choices, choiceOptions }
     records: [],
@@ -866,6 +896,14 @@
    * 6. Données : normalisation, couleurs, métadonnées Grist
    * ================================================================ */
 
+  function computeSearchText(rec) {
+    return norm([
+      rec.name, rec.cats.join(' '),
+      rec.details.map((d) => d.text).join(' '),
+      Object.keys(rec.filters).map((k) => rec.filters[k].join(' ')).join(' '),
+    ].join(' '));
+  }
+
   function normalizeRecords(rows) {
     const m = S.mappings || {};
     const detailCols = asArray(m.Details);
@@ -884,18 +922,20 @@
       filterCols.forEach((colId, i) => { filters[colId] = toList(fVals[i], colId); });
       const name = fmt(row.Nom, m.Nom).trim() || 'Ligne ' + row.id;
       const image = String(row.Image == null ? '' : row.Image).trim();
+      const fieldsRaw = {};
+      if (m.Nom) fieldsRaw[m.Nom] = row.Nom;
+      if (m.Categorie) fieldsRaw[m.Categorie] = row.Categorie;
+      if (m.Icone) fieldsRaw[m.Icone] = row.Icone;
+      if (m.Image) fieldsRaw[m.Image] = row.Image;
+      detailCols.forEach((colId, i) => { fieldsRaw[colId] = dVals[i]; });
       const rec = {
         id: row.id, name, lat, lng, cats,
         cat: cats[0] || '',
         icon: shortGlyph(fmt(row.Icone, m.Icone)),
         image: /^https?:\/\//i.test(image) ? image : '',
-        details, filters,
+        details, filters, fieldsRaw,
       };
-      rec.searchText = norm([
-        name, cats.join(' '),
-        details.map((d) => d.text).join(' '),
-        Object.keys(filters).map((k) => filters[k].join(' ')).join(' '),
-      ].join(' '));
+      rec.searchText = computeSearchText(rec);
       out.push(rec);
     });
     return { out, skipped };
@@ -908,6 +948,7 @@
       const tableId = typeof grist.getSelectedTableId === 'function'
         ? await grist.getSelectedTableId()
         : await grist.selectedTable.getTableId();
+      S.tableId = tableId;
       const [tables, cols] = await Promise.all([
         grist.docApi.fetchTable('_grist_Tables'),
         grist.docApi.fetchTable('_grist_Tables_column'),
@@ -1118,6 +1159,170 @@
    * 8. Sélection et fiche
    * ================================================================ */
 
+  // Édition d'un champ (crayon / validation) : types Grist simples uniquement.
+  const PENCIL_SVG = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19.5 8.5a2 2 0 0 0 0-2.8L18.3 4.5a2 2 0 0 0-2.8 0L4 16v4z"/><path d="M14.5 6.5l3 3"/></svg>';
+  const CHECK_SVG = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>';
+
+  function editableKind(colId) {
+    if (!colId) return null;
+    const type = (S.colMeta[colId] && S.colMeta[colId].type) || '';
+    if (type === 'Int') return 'int';
+    if (type === 'Numeric') return 'numeric';
+    if (type === 'Date') return 'date';
+    if (type.indexOf('DateTime') === 0) return 'datetime';
+    if (type === 'Choice') return 'choice';
+    if (type === 'ChoiceList') return 'choicelist';
+    if (type === 'Text' || type === 'Any' || type === '') return 'text';
+    return null; // Ref, RefList, Bool, Attachments… non gérés pour l'instant
+  }
+
+  function localInputValue(d) {
+    const p = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  const FIELD_KINDS = {
+    text: {
+      build(value) {
+        const i = document.createElement('input');
+        i.type = 'text'; i.className = 'select d-edit-input';
+        i.value = value == null ? '' : String(value);
+        return i;
+      },
+      read(el) { return el.value; },
+    },
+    int: {
+      build(value) {
+        const i = document.createElement('input');
+        i.type = 'number'; i.step = '1'; i.className = 'select d-edit-input';
+        i.value = (value == null || value === '') ? '' : String(value);
+        return i;
+      },
+      read(el) { const n = el.value.trim(); return n === '' ? null : Math.round(Number(n)); },
+    },
+    numeric: {
+      build(value) {
+        const i = document.createElement('input');
+        i.type = 'number'; i.step = 'any'; i.className = 'select d-edit-input';
+        i.value = (value == null || value === '') ? '' : String(value);
+        return i;
+      },
+      read(el) { const n = el.value.trim(); return n === '' ? null : Number(n); },
+    },
+    date: {
+      build(value) {
+        const i = document.createElement('input');
+        i.type = 'date'; i.className = 'select d-edit-input';
+        if (typeof value === 'number') i.value = new Date(value * 1000).toISOString().slice(0, 10);
+        return i;
+      },
+      read(el) { return el.value ? Math.round(new Date(el.value + 'T00:00:00Z').getTime() / 1000) : null; },
+    },
+    datetime: {
+      build(value) {
+        const i = document.createElement('input');
+        i.type = 'datetime-local'; i.className = 'select d-edit-input';
+        if (typeof value === 'number') i.value = localInputValue(new Date(value * 1000));
+        return i;
+      },
+      read(el) { return el.value ? Math.round(new Date(el.value).getTime() / 1000) : null; },
+    },
+    choice: {
+      build(value, meta) {
+        const s = document.createElement('select');
+        s.className = 'select d-edit-input';
+        const choices = (meta.choices || []).slice();
+        const cur = value == null ? '' : String(value);
+        if (cur && choices.indexOf(cur) < 0) choices.unshift(cur);
+        s.innerHTML = '<option value="">—</option>' + choices.map((c) =>
+          '<option value="' + esc(c) + '"' + (c === cur ? ' selected' : '') + '>' + esc(c) + '</option>').join('');
+        return s;
+      },
+      read(el) { return el.value || null; },
+    },
+    choicelist: {
+      build(value, meta) {
+        const wrap = document.createElement('div');
+        wrap.className = 'chips';
+        const current = new Set(Array.isArray(value) ? value.map(String) : []);
+        const choices = (meta.choices || []).slice();
+        current.forEach((c) => { if (choices.indexOf(c) < 0) choices.push(c); });
+        wrap.innerHTML = choices.map((c) => '<button type="button" class="chip' + (current.has(c) ? '' : ' off')
+          + '" data-value="' + esc(c) + '" aria-pressed="' + current.has(c) + '"><span class="lbl">' + esc(c) + '</span></button>').join('');
+        wrap.addEventListener('click', (e) => {
+          const b = e.target.closest('.chip');
+          if (!b) return;
+          const off = b.classList.toggle('off');
+          b.setAttribute('aria-pressed', String(!off));
+        });
+        return wrap;
+      },
+      read(el) { return qsa('.chip', el).filter((b) => !b.classList.contains('off')).map((b) => b.dataset.value); },
+    },
+  };
+
+  // Écrit la valeur dans Grist (UpdateRecord). Sans Grist (aperçu), la modification reste locale.
+  function saveFieldValue(colId, kind, value) {
+    if (S.source === 'grist' && hasGrist && S.tableId && S.selectedId != null) {
+      const encoded = kind === 'choicelist' ? ['L'].concat(value || []) : value;
+      return Promise.resolve(grist.docApi.applyUserActions([
+        ['UpdateRecord', S.tableId, S.selectedId, { [colId]: encoded }],
+      ]));
+    }
+    return Promise.resolve();
+  }
+
+  // Bascule une zone d'affichage en mode édition ; `onDone(value)` met à jour l'état local après succès.
+  function openFieldEditor(rowEl, displayEl, colId, kind, currentValue, onDone) {
+    if (!kind || rowEl.querySelector('.d-edit')) return;
+    const meta = S.colMeta[colId] || {};
+    const editor = FIELD_KINDS[kind].build(currentValue, meta);
+    const save = document.createElement('button');
+    save.type = 'button'; save.className = 'icon-btn f-save';
+    save.title = 'Valider'; save.setAttribute('aria-label', 'Valider la modification');
+    save.innerHTML = CHECK_SVG;
+    const err = document.createElement('p');
+    err.className = 'd-edit-error'; err.hidden = true;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'd-edit';
+    wrap.append(editor, save, err);
+
+    const pencil = rowEl.querySelector('.f-edit');
+    displayEl.before(wrap);
+    displayEl.hidden = true;
+    if (pencil) pencil.hidden = true;
+
+    function cleanup() {
+      wrap.remove();
+      displayEl.hidden = false;
+      if (pencil) pencil.hidden = false;
+    }
+
+    function confirmEdit() {
+      const value = FIELD_KINDS[kind].read(editor);
+      save.disabled = true;
+      saveFieldValue(colId, kind, value).then(() => {
+        onDone(value);
+        cleanup();
+      }).catch((e) => {
+        console.warn('[Carte] Écriture refusée :', e);
+        save.disabled = false;
+        err.hidden = false;
+        err.textContent = 'Modification non enregistrée (droits d’édition requis ?).';
+      });
+    }
+
+    save.addEventListener('click', confirmEdit);
+    wrap.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); cleanup(); }
+      else if (e.key === 'Enter' && kind !== 'choicelist' && e.target.tagName !== 'SELECT') { e.preventDefault(); confirmEdit(); }
+    });
+
+    const focusTarget = (editor.matches('input, select') ? editor : editor.querySelector('button, input, select'));
+    if (focusTarget) focusTarget.focus();
+  }
+
   function selectRecord(id, opts) {
     const o = Object.assign({ pan: false, fromGrist: false, openPanel: true }, opts);
     const prev = S.selectedId;
@@ -1136,11 +1341,45 @@
   function renderDetails(r) {
     const el = $('details');
     el.style.setProperty('--pin', pinPalette(pinColor(r)).fill);
+    const m = S.mappings || {};
 
+    // Referme toute édition restée ouverte (titre/catégorie) en changeant de point.
+    qsa('.d-edit', $('details')).forEach((w) => w.remove());
+    $('d-title').hidden = false;
     const tag = $('d-tag');
     tag.hidden = !r.cats.length;
     tag.textContent = r.cats.join(', ');
-    $('d-title').textContent = r.name;
+    const catKind = editableKind(m.Categorie);
+    const catEdit = $('d-cat-edit');
+    catEdit.hidden = !catKind;
+    catEdit.onclick = () => {
+      openFieldEditor(tag.parentElement, tag, m.Categorie, catKind, r.fieldsRaw[m.Categorie], (newVal) => {
+        r.fieldsRaw[m.Categorie] = newVal;
+        r.cats = Array.isArray(newVal) ? newVal.filter((x) => x !== null && x !== '').map(String) : (newVal ? [String(newVal)] : []);
+        r.cat = r.cats[0] || '';
+        r.searchText = computeSearchText(r);
+        tag.hidden = !r.cats.length;
+        tag.textContent = r.cats.join(', ');
+        computeCategoryColors();
+        renderFilters();
+        el.style.setProperty('--pin', pinPalette(pinColor(r)).fill);
+        refreshMarker(r.id);
+      });
+    };
+
+    const title = $('d-title');
+    title.textContent = r.name;
+    const nomKind = editableKind(m.Nom);
+    const titleEdit = $('d-title-edit');
+    titleEdit.hidden = !nomKind;
+    titleEdit.onclick = () => {
+      openFieldEditor(title.parentElement, title, m.Nom, nomKind, r.fieldsRaw[m.Nom], (newVal) => {
+        r.fieldsRaw[m.Nom] = newVal;
+        r.name = fmt(newVal, m.Nom).trim() || ('Ligne ' + r.id);
+        r.searchText = computeSearchText(r);
+        title.textContent = r.name;
+      });
+    };
 
     const media = $('d-media');
     const img = $('d-img');
@@ -1155,13 +1394,64 @@
 
     const dl = $('d-fields');
     dl.textContent = '';
-    r.details.forEach((d) => {
-      if (!d.text) return;
+
+    function addFieldRow(colId, label, textValue, onLocalUpdate) {
+      const kind = editableKind(colId);
+      if (!textValue && !kind) return;
       const dt = document.createElement('dt');
-      dt.textContent = labelFor(d.colId);
+      dt.textContent = label;
       const dd = document.createElement('dd');
-      renderValue(dd, d.text);
+      dd.className = 'd-field-row';
+      const val = document.createElement('span');
+      val.className = 'd-field-val';
+      if (textValue) renderValue(val, textValue); else val.textContent = '—';
+      dd.append(val);
+      if (kind) {
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'f-edit';
+        btn.title = 'Modifier'; btn.setAttribute('aria-label', 'Modifier ' + label);
+        btn.innerHTML = PENCIL_SVG;
+        btn.addEventListener('click', () => {
+          openFieldEditor(dd, val, colId, kind, r.fieldsRaw[colId], (newVal) => {
+            onLocalUpdate(newVal);
+            const text = fmt(newVal, colId);
+            val.innerHTML = '';
+            if (text) renderValue(val, text); else val.textContent = '—';
+          });
+        });
+        dd.append(btn);
+      }
       dl.append(dt, dd);
+    }
+
+    if (m.Icone) {
+      addFieldRow(m.Icone, labelFor(m.Icone), fmt(r.fieldsRaw[m.Icone], m.Icone), (newVal) => {
+        r.fieldsRaw[m.Icone] = newVal;
+        r.icon = shortGlyph(fmt(newVal, m.Icone));
+        refreshMarker(r.id);
+      });
+    }
+    if (m.Image) {
+      addFieldRow(m.Image, labelFor(m.Image), fmt(r.fieldsRaw[m.Image], m.Image), (newVal) => {
+        r.fieldsRaw[m.Image] = newVal;
+        const next = String(newVal == null ? '' : newVal).trim();
+        r.image = /^https?:\/\//i.test(next) ? next : '';
+        if (r.image) {
+          media.hidden = false;
+          img.onerror = () => { media.hidden = true; };
+          img.src = r.image;
+        } else {
+          media.hidden = true;
+          img.removeAttribute('src');
+        }
+      });
+    }
+    r.details.forEach((d) => {
+      addFieldRow(d.colId, labelFor(d.colId), d.text, (newVal) => {
+        r.fieldsRaw[d.colId] = newVal;
+        d.text = fmt(newVal, d.colId);
+        r.searchText = computeSearchText(r);
+      });
     });
     dl.hidden = !dl.childElementCount;
 
