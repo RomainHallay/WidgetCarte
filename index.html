@@ -175,6 +175,8 @@
   .d-fields dd { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
   .d-fields a { color: var(--accent-ink); }
   .d-coords { margin: 16px 0 0; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .d-meta { margin: 14px 0 0; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+  .d-meta-row { margin: 0; color: var(--muted); font-size: 11.5px; }
   .d-foot { flex: none; display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
   .d-foot .btn { flex: 1; justify-content: center; }
 
@@ -377,6 +379,10 @@
       <p class="d-note" id="d-hidden" hidden>Ce point est masqué par les filtres en cours.</p>
       <dl class="d-fields" id="d-fields"></dl>
       <p class="d-coords" id="d-coords"></p>
+      <div class="d-meta" id="d-meta" hidden>
+        <p class="d-meta-row" id="d-meta-created" hidden></p>
+        <p class="d-meta-row" id="d-meta-updated" hidden></p>
+      </div>
     </div>
     <div class="d-foot">
       <button type="button" class="btn primary" id="d-center">
@@ -525,6 +531,18 @@
       description: 'Colonnes affichées dans la fiche du point sélectionné.' },
     { name: 'Filtres', title: 'Filtres supplémentaires', type: 'Any', optional: true, allowMultiple: true,
       description: 'Chaque colonne ajoute une liste déroulante dans le panneau de filtres.' },
+    { name: 'CreeLe', title: 'Créé le', type: 'Any', optional: true,
+      description: 'Affiché en bas de la fiche, lecture seule. Grist ne donnant pas accès à la date de création, '
+        + 'utilisez une formule de déclenchement (=NOW(), appliquée aux nouveaux enregistrements).' },
+    { name: 'CreePar', title: 'Créé par', type: 'Any', optional: true,
+      description: 'Affiché en bas de la fiche, lecture seule. Formule de déclenchement =user.Name (ou =user.Email), '
+        + 'appliquée aux nouveaux enregistrements.' },
+    { name: 'ModifieLe', title: 'Modifié le', type: 'Any', optional: true,
+      description: 'Affiché en bas de la fiche, lecture seule. Formule de déclenchement =NOW(), '
+        + 'appliquée aux enregistrements modifiés.' },
+    { name: 'ModifiePar', title: 'Modifié par', type: 'Any', optional: true,
+      description: 'Affiché en bas de la fiche, lecture seule. Formule de déclenchement =user.Name (ou =user.Email), '
+        + 'appliquée aux enregistrements modifiés.' },
   ];
 
   const MESSAGES = {
@@ -928,12 +946,18 @@
       if (m.Icone) fieldsRaw[m.Icone] = row.Icone;
       if (m.Image) fieldsRaw[m.Image] = row.Image;
       detailCols.forEach((colId, i) => { fieldsRaw[colId] = dVals[i]; });
+      const meta = {
+        createdAt: m.CreeLe ? row.CreeLe : undefined,
+        createdBy: m.CreePar ? row.CreePar : undefined,
+        updatedAt: m.ModifieLe ? row.ModifieLe : undefined,
+        updatedBy: m.ModifiePar ? row.ModifiePar : undefined,
+      };
       const rec = {
         id: row.id, name, lat, lng, cats,
         cat: cats[0] || '',
         icon: shortGlyph(fmt(row.Icone, m.Icone)),
         image: /^https?:\/\//i.test(image) ? image : '',
-        details, filters, fieldsRaw,
+        details, filters, fieldsRaw, meta,
       };
       rec.searchText = computeSearchText(rec);
       out.push(rec);
@@ -1338,6 +1362,28 @@
     }
   }
 
+  // Texte d'un encart « Créé »/« Modifié » : combine date et auteur selon ce qui est mappé.
+  function metaLine(label, dateVal, dateColId, authorVal, authorColId) {
+    const dateText = dateVal != null && dateVal !== '' ? fmt(dateVal, dateColId) : '';
+    const authorText = authorVal != null && authorVal !== '' ? fmt(authorVal, authorColId) : '';
+    if (!dateText && !authorText) return '';
+    if (dateText && authorText) return label + ' le ' + dateText + ' par ' + authorText;
+    return dateText ? label + ' le ' + dateText : label + ' par ' + authorText;
+  }
+
+  function renderMeta(r) {
+    const m = S.mappings || {};
+    const created = metaLine('Créé', r.meta.createdAt, m.CreeLe, r.meta.createdBy, m.CreePar);
+    const updated = metaLine('Modifié', r.meta.updatedAt, m.ModifieLe, r.meta.updatedBy, m.ModifiePar);
+    const createdRow = $('d-meta-created');
+    const updatedRow = $('d-meta-updated');
+    createdRow.textContent = created;
+    createdRow.hidden = !created;
+    updatedRow.textContent = updated;
+    updatedRow.hidden = !updated;
+    $('d-meta').hidden = !created && !updated;
+  }
+
   function renderDetails(r) {
     const el = $('details');
     el.style.setProperty('--pin', pinPalette(pinColor(r)).fill);
@@ -1457,6 +1503,7 @@
 
     $('d-coords').textContent = r.lat.toFixed(5) + ', ' + r.lng.toFixed(5);
     $('d-osm').href = 'https://www.openstreetmap.org/?mlat=' + r.lat + '&mlon=' + r.lng + '#map=17/' + r.lat + '/' + r.lng;
+    renderMeta(r);
     renderNav();
   }
 
