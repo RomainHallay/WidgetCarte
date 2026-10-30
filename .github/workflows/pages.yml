@@ -1,0 +1,59 @@
+# Publie deux versions du widget sur GitHub Pages :
+#   - branche main          -> https://<user>.github.io/WidgetCarte/
+#   - branche RECETTE_BRANCH -> https://<user>.github.io/WidgetCarte/recette/
+# Le site complet est reconstruit à chaque push sur l'une des deux branches.
+
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main, feat_dsfr]
+  workflow_dispatch:
+
+env:
+  PROD_BRANCH: main
+  RECETTE_BRANCH: feat_dsfr
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout production
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PROD_BRANCH }}
+          path: prod
+
+      - name: Checkout recette
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RECETTE_BRANCH }}
+          path: recette
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site/recette
+          rsync -a --exclude='.git' --exclude='.github' prod/ _site/
+          rsync -a --exclude='.git' --exclude='.github' recette/ _site/recette/
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
