@@ -21,7 +21,7 @@
 <style>
   :root {
     --gap: .625rem;
-    --details-w: 30rem;
+    --details-w: 60rem;
     --panel-w: 26rem;
     --ease-out: cubic-bezier(.2, .8, .2, 1);
   }
@@ -108,21 +108,27 @@
   .d-nav { display: flex; align-items: center; gap: .125rem; }
   .d-pos { min-width: 3.5rem; margin: 0; color: var(--text-mention-grey); text-align: center; font-variant-numeric: tabular-nums; }
   .d-body { flex: 1; overflow: auto; padding: .25rem 1rem 1rem; }
-  .d-tag-row, .d-title-row { display: flex; align-items: center; gap: .25rem; }
+  .d-cat-row, .d-title-row { display: flex; align-items: center; gap: .25rem; }
+  .d-cat-row { flex-wrap: wrap; column-gap: .5rem; }
+  .d-label { color: var(--text-mention-grey); font-size: .875rem; }
+  .d-cat-val { display: inline-flex; flex-wrap: wrap; gap: .25rem; }
   .d-tag { gap: .375rem; margin: 0; }
   .d-tag::before { content: ""; flex: none; width: .5rem; height: .5rem; border-radius: 50%; background: var(--pin); }
   .d-title-row { align-items: flex-start; margin: .5rem 0 1rem; }
   .d-title { flex: 1; min-width: 0; margin: 0; font-size: 1.375rem; line-height: 1.75rem; overflow-wrap: anywhere; }
   .d-title:focus { outline-offset: 4px; }
   .d-note { margin: -.25rem 0 1rem; }
-  .d-fields { display: grid; grid-template-columns: minmax(6rem, 38%) 1fr; gap: .5rem 1rem; margin: 0; }
+  .d-fields { display: grid; grid-template-columns: minmax(6rem, min(38%, 14rem)) 1fr; gap: .5rem 1rem; margin: 0; }
   .d-fields dt { color: var(--text-mention-grey); font-size: .875rem; overflow-wrap: anywhere; }
   .d-fields dd { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
   .d-coords { margin: 1rem 0 0; color: var(--text-mention-grey); font-variant-numeric: tabular-nums; }
-  .d-meta { margin: 1rem 0 0; padding-top: .75rem; border-top: 1px solid var(--border-default-grey); }
-  .d-meta p { margin: 0; color: var(--text-mention-grey); }
-  .d-foot { flex: none; display: flex; flex-wrap: wrap; gap: .5rem; padding: .75rem 1rem; border-top: 1px solid var(--border-default-grey); }
-  .d-foot .fr-btn { flex: 1 1 auto; justify-content: center; margin: 0; }
+  .d-foot {
+    flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1rem;
+    padding: .75rem 1rem; border-top: 1px solid var(--border-default-grey); background: var(--background-alt-grey);
+  }
+  .d-meta { flex: 1 1 16rem; min-width: 0; }
+  .d-meta p { margin: 0; color: var(--text-mention-grey); overflow-wrap: anywhere; }
+  .d-foot .fr-btn { flex: none; margin: 0 0 0 auto; }
 
   .d-field-row { display: flex; align-items: flex-start; gap: .25rem; }
   .d-field-row .d-field-val { flex: 1; min-width: 0; }
@@ -205,9 +211,14 @@
   .leaflet-control-attribution { font-size: .75rem; background: rgba(255, 255, 255, .9) !important; color: #3a3a3a; }
   .leaflet-bottom.leaflet-right { transition: transform .26s var(--ease-out), opacity .2s; }
 
-  @media (min-width: 600px) {
+  @media (min-width: 1280px) {
     #app.details-open .toolbar, #app.details-open .panel { max-width: calc(100% - (var(--details-w) + 2.5rem)); }
     #app.details-open .leaflet-bottom.leaflet-right { transform: translateX(calc(-1 * (var(--details-w) + 1.25rem))); }
+  }
+  @media (min-width: 600px) and (max-width: 1279px) {
+    .details { top: calc(var(--gap) + 3.5rem); }
+    .panel { z-index: 1002; }
+    #app.details-open .counter, #app.details-open .leaflet-bottom.leaflet-right { opacity: 0; pointer-events: none; }
   }
   @media (max-width: 599px) {
     .details { top: auto; left: var(--gap); right: var(--gap); width: auto; max-height: 65%; transform: translateY(calc(100% + 1.5rem)); }
@@ -289,8 +300,9 @@
       <button type="button" class="fr-btn--close fr-btn" id="d-close" title="Fermer la fiche">Fermer</button>
     </div>
     <div class="d-body">
-      <div class="d-tag-row">
-        <p class="fr-tag fr-tag--sm d-tag" id="d-tag" hidden></p>
+      <div class="d-cat-row" id="d-cat-row" hidden>
+        <span class="d-label" id="d-cat-label">Catégorie</span>
+        <span class="d-cat-val" id="d-cat-val"><span class="fr-tag fr-tag--sm d-tag" id="d-tag" hidden></span><span id="d-tag-empty" hidden></span></span>
         <button type="button" class="fr-btn fr-btn--sm fr-btn--tertiary-no-outline fr-icon-edit-line f-edit" id="d-cat-edit" hidden title="Modifier la catégorie">Modifier la catégorie</button>
       </div>
       <div class="d-title-row">
@@ -302,14 +314,13 @@
       </div>
       <dl class="d-fields" id="d-fields"></dl>
       <p class="d-coords fr-text--sm" id="d-coords"></p>
-      <div class="d-meta fr-text--xs" id="d-meta" hidden>
-        <p id="d-meta-created" hidden></p>
-        <p id="d-meta-updated" hidden></p>
-      </div>
     </div>
     <div class="d-foot">
+      <div class="d-meta fr-text--xs" id="d-meta" hidden>
+        <p id="d-meta-created"></p>
+        <p id="d-meta-updated"></p>
+      </div>
       <button type="button" class="fr-btn fr-btn--sm fr-btn--icon-left fr-icon-focus-3-line" id="d-center">Centrer sur la carte</button>
-      <a class="fr-btn fr-btn--sm fr-btn--secondary fr-btn--icon-left fr-icon-external-link-line" id="d-osm" target="_blank" rel="noopener" title="Voir sur OpenStreetMap – nouvelle fenêtre">OpenStreetMap</a>
     </div>
   </aside>
 
@@ -615,6 +626,7 @@
   }
 
   const isSheetLayout = () => window.matchMedia('(max-width: 599px)').matches;
+  const isSideBySide = () => window.matchMedia('(min-width: 1280px)').matches;
 
   if (typeof L === 'undefined') {
     $('msg-title').textContent = 'Carte indisponible';
@@ -631,7 +643,7 @@
   const hasLayerRaw = map.hasLayer;
   map.hasLayer = function (layer) { return !!layer && hasLayerRaw.call(this, layer); };
   L.control.zoom({ position: 'bottomright', zoomInTitle: 'Zoom avant', zoomOutTitle: 'Zoom arrière' }).addTo(map);
-  map.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener" title="Leaflet – nouvelle fenêtre">Leaflet</a>');
+  map.attributionControl.setPrefix(false);
 
   let tileLayer = null;
   let appliedBasemap = null;
@@ -672,7 +684,8 @@
   function panelOffset() {
     if (!S.panelOpen) return { dx: 0, dy: 0 };
     const el = $('details');
-    return isSheetLayout() ? { dx: 0, dy: el.offsetHeight + 10 } : { dx: el.offsetWidth + 10, dy: 0 };
+    const free = Math.max(0, map.getSize().x - 160);
+    return isSheetLayout() ? { dx: 0, dy: el.offsetHeight + 10 } : { dx: Math.min(el.offsetWidth + 10, free), dy: 0 };
   }
 
   function fitVisible(animate) {
@@ -1315,7 +1328,7 @@
     if (!rec) { closeDetails(true); return; }
     if (o.openPanel) { renderDetails(rec); openDetails(); }
 
-    if (o.openPanel && isSheetLayout()) closeTool();
+    if (o.openPanel && !isSideBySide()) closeTool();
     if (o.openPanel && o.focus) $('d-title').focus({ preventScroll: true });
     if (o.pan) panToRecord(id);
     if (!o.fromGrist && S.source === 'grist') {
@@ -1324,25 +1337,29 @@
     }
   }
 
-  function metaLine(label, dateVal, dateColId, authorVal, authorColId) {
+  function metaLine(label, empty, dateVal, dateColId, authorVal, authorColId) {
     const dateText = dateVal != null && dateVal !== '' ? fmt(dateVal, dateColId) : '';
     const authorText = authorVal != null && authorVal !== '' ? fmt(authorVal, authorColId) : '';
-    if (!dateText && !authorText) return '';
+    if (!dateText && !authorText) return empty;
     if (dateText && authorText) return label + ' le ' + dateText + ' par ' + authorText;
     return dateText ? label + ' le ' + dateText : label + ' par ' + authorText;
   }
 
   function renderMeta(r) {
     const m = S.mappings || {};
-    const created = metaLine('Créé', r.meta.createdAt, m.CreeLe, r.meta.createdBy, m.CreePar);
-    const updated = metaLine('Modifié', r.meta.updatedAt, m.ModifieLe, r.meta.updatedBy, m.ModifiePar);
-    const createdRow = $('d-meta-created');
-    const updatedRow = $('d-meta-updated');
-    createdRow.textContent = created;
-    createdRow.hidden = !created;
-    updatedRow.textContent = updated;
-    updatedRow.hidden = !updated;
-    $('d-meta').hidden = !created && !updated;
+    $('d-meta').hidden = !(m.CreeLe || m.CreePar || m.ModifieLe || m.ModifiePar);
+    $('d-meta-created').textContent = metaLine('Créé', 'Création : non renseignée',
+      r.meta.createdAt, m.CreeLe, r.meta.createdBy, m.CreePar);
+    $('d-meta-updated').textContent = metaLine('Modifié', 'Modification : non renseignée',
+      r.meta.updatedAt, m.ModifieLe, r.meta.updatedBy, m.ModifiePar);
+  }
+
+  function renderCategory(r) {
+    const has = r.cats.length > 0;
+    $('d-tag').hidden = !has;
+    $('d-tag').textContent = r.cats.join(', ');
+    $('d-tag-empty').hidden = has;
+    if (!has) renderEmpty($('d-tag-empty'));
   }
 
   function renderDetails(r) {
@@ -1352,20 +1369,23 @@
 
     qsa('.d-edit', $('details')).forEach((w) => w.remove());
     $('d-title').hidden = false;
-    const tag = $('d-tag');
-    tag.hidden = !r.cats.length;
-    tag.textContent = r.cats.join(', ');
+    const catVal = $('d-cat-val');
+    const catLabel = m.Categorie ? labelFor(m.Categorie) : '';
+    catVal.hidden = false;
+    $('d-cat-row').hidden = !m.Categorie;
+    $('d-cat-label').innerHTML = esc(catLabel) + '<span class="fr-sr-only"> :</span>';
+    renderCategory(r);
     const catKind = editableKind(m.Categorie);
     const catEdit = $('d-cat-edit');
     catEdit.hidden = !catKind;
+    catEdit.textContent = catEdit.title = 'Modifier « ' + catLabel + ' »';
     catEdit.onclick = () => {
-      openFieldEditor(tag.parentElement, tag, m.Categorie, catKind, r.fieldsRaw[m.Categorie], labelFor(m.Categorie), (newVal) => {
+      openFieldEditor(catVal.parentElement, catVal, m.Categorie, catKind, r.fieldsRaw[m.Categorie], catLabel, (newVal) => {
         r.fieldsRaw[m.Categorie] = newVal;
         r.cats = Array.isArray(newVal) ? newVal.filter((x) => x !== null && x !== '').map(String) : (newVal ? [String(newVal)] : []);
         r.cat = r.cats[0] || '';
         r.searchText = computeSearchText(r);
-        tag.hidden = !r.cats.length;
-        tag.textContent = r.cats.join(', ');
+        renderCategory(r);
         computeCategoryColors();
         renderFilters();
         el.style.setProperty('--pin', pinPalette(pinColor(r)).fill);
@@ -1463,9 +1483,6 @@
 
     $('d-coords').innerHTML = '<span class="fr-sr-only">Coordonnées : latitude </span>' + r.lat.toFixed(5)
       + '<span aria-hidden="true">, </span><span class="fr-sr-only">, longitude </span>' + r.lng.toFixed(5);
-    const osm = $('d-osm');
-    osm.href = 'https://www.openstreetmap.org/?mlat=' + r.lat + '&mlon=' + r.lng + '#map=17/' + r.lat + '/' + r.lng;
-    osm.title = 'Voir « ' + r.name + ' » sur OpenStreetMap – nouvelle fenêtre';
     renderMeta(r);
     renderNav();
   }
